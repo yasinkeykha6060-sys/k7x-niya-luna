@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { addDays, daysBetween, isValidJalali, parseDate, tehranToday, toFaDigits, toGregorian, toJalali } from "../src/dates.js";
 import { cycleStats, dueReminders, forecast, monthModel } from "../src/cycle.js";
 import { emptyState, migrate, step } from "../src/logic.js";
-import { reminder, tip } from "../src/phrases.js";
+import { petName, reminder, tip } from "../src/phrases.js";
 import { open, seal } from "../src/store.js";
 import { randomBytes } from "node:crypto";
 
@@ -113,7 +113,13 @@ test("each person keeps a reusable journal, with checks and fresh tips", () => {
   result = step(result.state, { chatId: 7, text: "جستجو درد" }, noon);
   assert.match(result.replies[0].text, /پزشک/);
   result = step(emptyState(), { chatId: 3, text: "سلام" }, noon);
+  assert.match(result.replies[0].text, /خوش آمدی آنی خانمم/);
   assert.match(result.replies[0].text, /دفترچه/);
+  result = step(result.state, { chatId: 3, text: "داروها" }, noon);
+  assert.match(result.replies[0].text, /t\.me\/Niyayesh_Love_bot/);
+  assert.match(result.replies[0].text, /نیاشم|نیایش جانم|نیایش عزیزم/);
+  const names = new Set(["۱", "۲", "۳", "۴"].map((seed) => petName(seed)));
+  assert.ok(names.size >= 2);
   assert.equal(result.state.users["3"].welcomed, true);
   assert.equal(toFaDigits(27), "۲۷");
   assert.equal(tehranToday(noon), "2026-11-18");

@@ -1,7 +1,12 @@
 import { daysBetween, formatDual, formatJalali, toFaDigits } from "./dates.js";
 
-export const MEDICINE_URL = "https://t.me/Niayesh_media_bot";
+export const MEDICINE_URL = "https://t.me/Niyayesh_Love_bot";
 export const CARE = "مراقب خودت باش. یاسین خیلی دوستت داره.";
+const NAMES = ["نیاشم", "نیایش جانم", "نیایش عزیزم"];
+
+export function petName(seed) {
+  return pick(NAMES, seed);
+}
 
 function pick(list, seed) {
   const text = String(seed);
@@ -95,17 +100,17 @@ function line(when, approximate, text) {
 
 const REMINDERS = {
   d3: [
-    (when, approximate) => line(when, approximate, "جان، حدود سه روز دیگر ممکن است عادت ماهانه‌ات شروع شود. از حالا یک غذای گرم، مثل آش یا سوپ، بگذار توی برنامه‌ی این روزها."),
+    (when, approximate) => line(when, approximate, `${pick(NAMES, "d3-a")}، حدود سه روز دیگر ممکن است عادت ماهانه‌ات شروع شود. از حالا یک غذای گرم، مثل آش یا سوپ، بگذار توی برنامه‌ی این روزها.`),
     (when, approximate) => line(when, approximate, "سه روز مانده تا تاریخ احتمالی. بطری آب گرم را دمِ دست بگذار و شامت را سبک و گرم بگیر."),
-    (when, approximate) => line(when, approximate, "جان، بدنت دارد نزدیک می‌شود. لازم نیست همه‌چیز را بچینی؛ شیر گرم یا یک سوپِ ساده هم آمادگی است."),
+    (when, approximate) => line(when, approximate, `${pick(NAMES, "d3-c")}، بدنت دارد نزدیک می‌شود. لازم نیست همه‌چیز را بچینی؛ شیر گرم یا یک سوپِ ساده هم آمادگی است.`),
   ],
   d1: [
-    (when, approximate) => line(when, approximate, "جان، فردا ممکن است شروع شود. امشب زودتر بخواب و یک نوشیدنی گرم کنار دستت باشد."),
+    (when, approximate) => line(when, approximate, `${pick(NAMES, "d1-a")}، فردا ممکن است شروع شود. امشب زودتر بخواب و یک نوشیدنی گرم کنار دستت باشد.`),
     (when, approximate) => line(when, approximate, "فردا را اگر می‌شود خلوت‌تر کن. شامِ گرم و نرم، از یک شبِ شلوغ مهربان‌تر است."),
     (when, approximate) => line(when, approximate, "یک روز مانده. کیف کوچک را آماده کن: نوار یا کاپ، آب گرم، و چیزی نرم برای خوردن."),
   ],
   d0: [
-    (when, approximate) => line(when, approximate, "جان، امروز همان تاریخ احتمالی است. اگر شروع شد «ثبت شروع» را بزن. اگر نشد، غذای گرم بخور و عجله نکن."),
+    (when, approximate) => line(when, approximate, `${pick(NAMES, "d0-a")}، امروز همان تاریخ احتمالی است. اگر شروع شد «ثبت شروع» را بزن. اگر نشد، غذای گرم بخور و عجله نکن.`),
     (when, approximate) => line(when, approximate, "امروز را سبک بردار. یک کاسه‌ی گرم، یک جای نرم برای دراز کشیدن، و هیچ قرارِ اضافه‌ای."),
     (when, approximate) => line(when, approximate, "اگر امروز شروع شد، فقط همان را ثبت کن. اگر عقب افتاد، بدن خراب نشده؛ گاهی خواب و خستگی تاریخ را جابه‌جا می‌کنند."),
   ],
@@ -113,10 +118,11 @@ const REMINDERS = {
 
 export function welcome(returning) {
   if (returning) {
-    return `جان، برگشتی. دفترچه‌ات سر جایش است و هر ماه دوباره می‌توانی بنویسی.\n${CARE}`;
+    return `خوش آمدی آنی خانمم. دفترچه‌ات سر جایش است و هر ماه دوباره می‌توانی بنویسی.\n${CARE}`;
   }
   return [
-    "جان، این دفترچه‌ی ماهِ توست.",
+    "خوش آمدی آنی خانمم.",
+    "این دفترچه‌ی ماهِ توست.",
     "هر وقت عادت ماهانه‌ات شروع شد «ثبت شروع» را بزن، و هر وقت تمام شد «ثبت پایان».",
     "نزدیکش که بشود آرام یادت می‌آورم. تاریخ‌ها شمسی‌اند و میلادی، به وقت تهران.",
     "هر چند نفر که بخواهند می‌توانند دفترچه‌ی خودشان را داشته باشند. مالِ تو پیشِ خودت می‌ماند.",
@@ -149,11 +155,11 @@ export function statusText(forecast, today) {
 }
 
 export function savedStart(iso) {
-  return `نوشتم، جان.\nشروع: ${formatDual(iso)}\nاگر این تاریخ نبود، از «تاریخ‌ها» اصلاحش کن. هر ماه دوباره می‌توانی ثبت کنی.\n${CARE}`;
+  return `نوشتم، ${petName(iso)}.\nشروع: ${formatDual(iso)}\nاگر این تاریخ نبود، از «تاریخ‌ها» اصلاحش کن. هر ماه دوباره می‌توانی ثبت کنی.\n${CARE}`;
 }
 
 export function savedEnd(cycle) {
-  return `پایان را هم گذاشتم.\nاز ${formatJalali(cycle.start)} تا ${formatJalali(cycle.end)}.\nتمام شد. یک چیز گرم بخور و کمی دراز بکش.\n${CARE}`;
+  return `پایان را هم گذاشتم، ${petName(cycle.end)}.\nاز ${formatJalali(cycle.start)} تا ${formatJalali(cycle.end)}.\nتمام شد. یک چیز گرم بخور و کمی دراز بکش.\n${CARE}`;
 }
 
 export function reminder(item) {

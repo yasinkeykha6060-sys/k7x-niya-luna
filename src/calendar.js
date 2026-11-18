@@ -1,4 +1,5 @@
 import { J_MONTHS, formatGregorian, toFaDigits, toJalali } from "./dates.js";
+import { petName } from "./phrases.js";
 import { monthModel } from "./cycle.js";
 
 const HEADS = ["ش", "ی", "د", "س", "چ", "پ", "ج"];
@@ -40,7 +41,7 @@ export function renderCalendar(cycles, jy, jm, today) {
     ? `شروع بعدی، حدود ${toFaDigits(toJalali(model.next).jd)} ${J_MONTHS[toJalali(model.next).jm - 1]}.`
     : "با اولین «ثبت شروع»، پیش‌بینی روی تقویم می‌آید.";
   const text = [
-    `جان، تقویم ${title}.`,
+    `${petName(`${jy}-${jm}`)}، تقویم ${title}.`,
     span,
     `<pre>${rows.join("\n")}</pre>`,
     "✓ ثبت‌شده    * امروز    · سه روز قبل",

@@ -2,7 +2,7 @@ import { renderCalendar } from "./calendar.js";
 import { forecast, openCycle } from "./cycle.js";
 import { formatDual, formatJalali, parseDate, tehranToday, toJalali } from "./dates.js";
 import { searchHint, searchKnowledge } from "./knowledge.js";
-import { MEDICINE_URL, phaseOf, savedEnd, savedStart, statusText, tip, welcome } from "./phrases.js";
+import { MEDICINE_URL, petName, phaseOf, savedEnd, savedStart, statusText, tip, welcome } from "./phrases.js";
 
 export function emptyState() {
   return { version: 2, offset: 0, revision: 0, users: {} };
@@ -287,7 +287,7 @@ export function step(raw, event, now = new Date()) {
   }
 
   if (text === "داروها" || text === "دارو") {
-    replies.push(reply(`جان، قرص‌ها و ویتامین‌ها را همان ربات قبلی یادت می‌آورد تا با این دفترچه قاطی نشود.\n${MEDICINE_URL}`));
+    replies.push(reply(`${petName("دارو")}، قرص‌ها و ویتامین‌ها را این ربات یادت می‌آورد تا با این دفترچه قاطی نشود.\n${MEDICINE_URL}`));
     return done(replies);
   }
 
