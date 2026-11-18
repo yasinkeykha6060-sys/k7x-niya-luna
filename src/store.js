@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { emptyState, migrate } from "./logic.js";
 
 const FILE = "data/state.enc";
@@ -26,10 +26,15 @@ export function open(payload, key) {
 }
 
 export function load(hex = process.env.DATA_KEY) {
-  if (!existsSync(FILE)) return emptyState();
+  if (!existsSync(FILE)) {
+    if (process.env.AUTO_PUSH === "1") throw new Error("دفترچه روی گیت‌هاب پیدا نشد. خالی جایگزینش نمی‌کنم.");
+    return emptyState();
+  }
   return migrate(open(readFileSync(FILE, "utf8"), keyFrom(hex)));
 }
 
 export function save(state, hex = process.env.DATA_KEY) {
-  writeFileSync(FILE, `${seal(state, keyFrom(hex))}\n`);
+  const temporary = `${FILE}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${seal(state, keyFrom(hex))}\n`);
+  renameSync(temporary, FILE);
 }

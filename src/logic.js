@@ -5,17 +5,26 @@ import { searchHint, searchKnowledge } from "./knowledge.js";
 import { MEDICINE_URL, phaseOf, savedEnd, savedStart, statusText, tip, welcome } from "./phrases.js";
 
 export function emptyState() {
-  return { version: 2, offset: 0, users: {} };
+  return { version: 2, offset: 0, revision: 0, users: {} };
 }
 
 function blankUser() {
-  return { nextId: 1, cycles: [], pending: null, sent: {}, tipCursor: 0, welcomed: false };
+  return { nextId: 1, cycles: [], pending: null, sent: {}, tipCursor: 0, welcomed: false, rev: 0, gone: {} };
 }
 
 export function migrate(raw) {
   if (!raw || typeof raw !== "object") return emptyState();
   if (raw.users && raw.version === 2) {
     if (typeof raw.offset !== "number") raw.offset = 0;
+    if (typeof raw.revision !== "number") raw.revision = 0;
+    for (const user of Object.values(raw.users)) {
+      if (!user || typeof user !== "object") continue;
+      user.cycles = Array.isArray(user.cycles) ? user.cycles : [];
+      user.sent = user.sent && typeof user.sent === "object" ? user.sent : {};
+      user.gone = user.gone && typeof user.gone === "object" ? user.gone : {};
+      user.rev = Number(user.rev) || 0;
+      if (!user.nextId) user.nextId = 1;
+    }
     return raw;
   }
   const users = {};
@@ -27,6 +36,8 @@ export function migrate(raw) {
       sent: raw.sent && typeof raw.sent === "object" ? raw.sent : {},
       tipCursor: 0,
       welcomed: true,
+      rev: 1,
+      gone: {},
     };
   }
   const offset = Number(raw.offset) || 0;
@@ -124,12 +135,47 @@ export function step(raw, event, now = new Date()) {
   const data = event.data || "";
   const replies = [];
   const user = userOf(state, chatId);
+  const beforeIds = new Set(user.cycles.map((cycle) => cycle.id));
+  const beforeCycles = new Map(user.cycles.map((cycle) => [cycle.id, { ...cycle }]));
+  const beforeCore = JSON.stringify({
+    cycles: user.cycles.map(({ rev, ...cycle }) => cycle),
+    pending: user.pending,
+    sent: user.sent,
+    tipCursor: user.tipCursor,
+    welcomed: user.welcomed,
+    nextId: user.nextId,
+  });
+
+  function done(items) {
+    const afterCore = JSON.stringify({
+      cycles: user.cycles.map(({ rev, ...cycle }) => cycle),
+      pending: user.pending,
+      sent: user.sent,
+      tipCursor: user.tipCursor,
+      welcomed: user.welcomed,
+      nextId: user.nextId,
+    });
+    if (afterCore !== beforeCore) {
+      user.rev = (Number(user.rev) || 0) + 1;
+      user.gone = user.gone || {};
+      for (const id of beforeIds) {
+        if (!user.cycles.some((cycle) => cycle.id === id)) user.gone[id] = user.rev;
+      }
+      for (const cycle of user.cycles) {
+        const prev = beforeCycles.get(cycle.id);
+        const body = JSON.stringify({ ...cycle, rev: undefined });
+        const prevBody = prev ? JSON.stringify({ ...prev, rev: undefined }) : null;
+        if (body !== prevBody) cycle.rev = user.rev;
+      }
+    }
+    return { state, replies: items };
+  }
 
   if (data.startsWith("cal:")) {
     const [, year, month] = data.split(":");
     const view = renderCalendar(user.cycles, Number(year), Number(month), today);
     replies.push({ text: view.text, inline: view.inline });
-    return { state, replies };
+    return done(replies);
   }
 
   if (data.startsWith("del:")) {
@@ -144,7 +190,7 @@ export function step(raw, event, now = new Date()) {
         ]] },
       });
     }
-    return { state, replies };
+    return done(replies);
   }
 
   if (data.startsWith("yesdel:")) {
@@ -152,12 +198,12 @@ export function step(raw, event, now = new Date()) {
     const before = user.cycles.length;
     user.cycles = user.cycles.filter((cycle) => cycle.id !== id);
     replies.push(reply(user.cycles.length === before ? "قبلاً پاک شده بود." : "پاک شد. تقویم هم با همین حساب تازه می‌شود. هر وقت خواستی دوباره ثبت کن."));
-    return { state, replies };
+    return done(replies);
   }
 
   if (data === "nodel") {
     replies.push(reply("باشد، دست نزدم."));
-    return { state, replies };
+    return done(replies);
   }
 
   if (data.startsWith("edits:") || data.startsWith("edite:")) {
@@ -168,19 +214,19 @@ export function step(raw, event, now = new Date()) {
       user.pending = { kind, id };
       replies.push(reply("تاریخ تازه را بفرست. مثلاً ۱۴۰۵/۰۸/۲۷ یا 2026-11-18 یا امروز. اگر منصرف شدی، «بیخیال» را بنویس."));
     }
-    return { state, replies };
+    return done(replies);
   }
 
   if (text === "بیخیال") {
     user.pending = null;
     replies.push(reply("باشد. هیچ‌چیز عوض نشد."));
-    return { state, replies };
+    return done(replies);
   }
 
   if (text === "آزادش کن") {
     user.pending = null;
     replies.push(reply("دفترچه قفل نیست. هر کس از گوشی خودش دفترچه‌ی جدا دارد و هر ماه می‌تواند دوباره ثبت کند. برای پاک کردن یک تاریخ، «تاریخ‌ها» را بزن."));
-    return { state, replies };
+    return done(replies);
   }
 
   if (menuButton(text)) user.pending = null;
@@ -189,18 +235,18 @@ export function step(raw, event, now = new Date()) {
     if (user.pending.kind === "search") {
       user.pending = null;
       replies.push(reply(searchKnowledge(text) || `برای «${esc(text)}» یادداشت آماده‌ای ندارم.\n${searchHint()}`));
-      return { state, replies };
+      return done(replies);
     }
     const iso = parseDate(text, today);
     if (!iso) {
       replies.push(reply("این تاریخ را نخواندم. یک بار دیگر، مثل ۱۴۰۵/۰۸/۲۷ یا ۲۷ آبان ۱۴۰۵."));
-      return { state, replies };
+      return done(replies);
     }
     const cycle = findCycle(user, user.pending.id);
     if (!cycle) {
       user.pending = null;
       replies.push(reply("آن مورد دیگر در دفترچه نیست."));
-      return { state, replies };
+      return done(replies);
     }
     if (user.pending.kind === "edit-start") {
       if (cycle.end && iso > cycle.end) replies.push(reply("شروع بعد از پایان نمی‌شود."));
@@ -217,14 +263,14 @@ export function step(raw, event, now = new Date()) {
         replies.push(reply(`پایان را عوض کردم: ${formatDual(iso)}`));
       }
     }
-    return { state, replies };
+    return done(replies);
   }
 
   if (text === "/start" || text === "شروع دفتر") {
     const returning = user.welcomed || user.cycles.length > 0;
     user.welcomed = true;
     replies.push(reply(welcome(returning)));
-    return { state, replies };
+    return done(replies);
   }
 
   if (text === "راهنما" || text === "/help") {
@@ -237,17 +283,17 @@ export function step(raw, event, now = new Date()) {
       "نکته هر بار یک حرف تازه می‌زند. جستجو از یادداشت‌های همین دفترچه جواب می‌دهد.",
       "دفترچه‌ی هر کس جداست. داروها در ربات جدا یادآوری می‌شوند.",
     ].join("\n")));
-    return { state, replies };
+    return done(replies);
   }
 
   if (text === "داروها" || text === "دارو") {
     replies.push(reply(`جان، قرص‌ها و ویتامین‌ها را همان ربات قبلی یادت می‌آورد تا با این دفترچه قاطی نشود.\n${MEDICINE_URL}`));
-    return { state, replies };
+    return done(replies);
   }
 
   if (text === "وضعیت" || text === "/status") {
     replies.push(reply(statusText(forecast(user.cycles, today), today)));
-    return { state, replies };
+    return done(replies);
   }
 
   if (text === "نکته" || text === "/tip") {
@@ -255,32 +301,32 @@ export function step(raw, event, now = new Date()) {
     const cursor = user.tipCursor || 0;
     user.tipCursor = cursor + 1;
     replies.push(reply(tip(phaseOf(cast, today), cursor)));
-    return { state, replies };
+    return done(replies);
   }
 
   if (text === "تقویم" || text === "/calendar") {
     const nowJ = toJalali(today);
     const view = renderCalendar(user.cycles, nowJ.jy, nowJ.jm, today);
     replies.push({ text: view.text, inline: view.inline, keyboard: MAIN_KEYBOARD });
-    return { state, replies };
+    return done(replies);
   }
 
   if (text === "تاریخ‌ها" || text === "تاریخها" || text === "/dates") {
     const view = listText(user);
     replies.push({ text: view.text, inline: view.inline, keyboard: MAIN_KEYBOARD });
-    return { state, replies };
+    return done(replies);
   }
 
   if (text === "جستجو" || text === "/search") {
     user.pending = { kind: "search" };
     replies.push(reply(searchHint()));
-    return { state, replies };
+    return done(replies);
   }
 
   if (text.startsWith("جستجو ")) {
     const query = text.slice("جستجو ".length);
     replies.push(reply(searchKnowledge(query) || `برای «${esc(query)}» یادداشت آماده‌ای ندارم.\n${searchHint()}`));
-    return { state, replies };
+    return done(replies);
   }
 
   if (text.startsWith("یادداشت ")) {
@@ -290,7 +336,7 @@ export function step(raw, event, now = new Date()) {
       cycle.note = text.slice("یادداشت ".length).slice(0, 80);
       replies.push(reply(`یادداشت را برای ${formatJalali(cycle.start)} گذاشتم.`));
     }
-    return { state, replies };
+    return done(replies);
   }
 
   const startMatch = text.match(/^(?:ثبت شروع|شروع)(?:\s+(.+))?$/);
@@ -301,7 +347,7 @@ export function step(raw, event, now = new Date()) {
       const result = addStart(user, iso);
       replies.push(reply(result.error || savedStart(iso)));
     }
-    return { state, replies };
+    return done(replies);
   }
 
   const endMatch = text.match(/^(?:ثبت پایان|پایان)(?:\s+(.+))?$/);
@@ -312,7 +358,7 @@ export function step(raw, event, now = new Date()) {
       const result = closeLatest(user, iso);
       replies.push(reply(result.error || savedEnd(result.cycle)));
     }
-    return { state, replies };
+    return done(replies);
   }
 
   const remove = text.match(/^حذف\s+(\d+)$/);
@@ -326,15 +372,15 @@ export function step(raw, event, now = new Date()) {
         { text: "نه", callback_data: "nodel" },
       ]] },
     });
-    return { state, replies };
+    return done(replies);
   }
 
   if (!user.welcomed) {
     user.welcomed = true;
     replies.push(reply(welcome(false)));
-    return { state, replies };
+    return done(replies);
   }
 
   replies.push(reply("این یکی را نفهمیدم. از دکمه‌ها استفاده کن، یا «راهنما» را بزن."));
-  return { state, replies };
+  return done(replies);
 }
