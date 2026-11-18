@@ -1,0 +1,13 @@
+{
+  "name": "k7x-niya-luna",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "jalaali-js": "1.2.8"
+  }
+}
