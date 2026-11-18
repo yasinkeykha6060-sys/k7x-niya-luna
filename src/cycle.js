@@ -26,7 +26,7 @@ export function cycleStats(cycles) {
     gaps,
     skipped,
     cycleLen: gaps.length ? Math.round(average(gaps)) : 28,
-    periodLen: bleeds.length ? Math.round(average(bleeds)) : 5,
+    periodLen: bleeds.length ? Math.round(average(bleeds)) : null,
     enough: gaps.length >= 2,
     usedDefaultCycle: gaps.length === 0,
     usedDefaultPeriod: bleeds.length === 0,
@@ -55,12 +55,18 @@ export function forecast(cycles, today) {
   return { stats, last, next, lateDays: rolled ? 0 : Math.max(0, daysBetween(next, today)), rolled };
 }
 
-export function loggedDays(cycles) {
+export function loggedDays(cycles, today) {
   const days = new Set();
   for (const cycle of cycles) {
-    if (!cycle.start || !cycle.end || cycle.end < cycle.start) continue;
+    if (!cycle.start) continue;
+    let end = cycle.end;
+    if (!end) {
+      if (!today || today < cycle.start) continue;
+      end = today;
+    }
+    if (end < cycle.start) continue;
     let day = cycle.start;
-    for (let guard = 0; guard < 14 && day <= cycle.end; guard += 1) {
+    for (let guard = 0; guard < 14 && day <= end; guard += 1) {
       days.add(day);
       day = addDays(day, 1);
     }
@@ -81,8 +87,8 @@ export function rangeDays(start, count) {
 
 export function monthModel(cycles, jy, jm, today) {
   const { stats, next } = forecast(cycles, today);
-  const logged = loggedDays(cycles);
-  const predicted = next ? rangeDays(next, stats.periodLen) : new Set();
+  const logged = loggedDays(cycles, today);
+  const predicted = next ? rangeDays(next, stats.periodLen || 1) : new Set();
   const pms = next ? rangeDays(addDays(next, -3), 3) : new Set();
   const length = monthLength(jy, jm);
   const first = toGregorian(jy, jm, 1);

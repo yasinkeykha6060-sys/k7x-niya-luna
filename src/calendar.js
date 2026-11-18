@@ -1,16 +1,20 @@
 import { J_MONTHS, formatGregorian, toFaDigits, toJalali } from "./dates.js";
 import { monthModel } from "./cycle.js";
 
-const WEEK = "ش  ی  د  س  چ  پ  ج";
+const HEADS = ["ش", "ی", "د", "س", "چ", "پ", "ج"];
+
+function num(jd) {
+  return toFaDigits(String(jd).padStart(2, "0"));
+}
 
 function cell(day) {
-  const mark = day.today ? "*" : day.logged ? "+" : day.predicted ? "~" : day.pms ? "." : " ";
-  return mark + String(day.jd).padStart(2, " ");
+  const mark = day.logged ? "✓" : day.today ? "*" : day.predicted ? "~" : day.pms ? "·" : " ";
+  return mark + num(day.jd);
 }
 
 export function renderCalendar(cycles, jy, jm, today) {
   const model = monthModel(cycles, jy, jm, today);
-  const rows = [WEEK];
+  const rows = [HEADS.map((day) => day.padStart(3, " ")).join(" ")];
   let row = "    ".repeat(model.lead);
   model.days.forEach((day, index) => {
     row += cell(day);
@@ -26,15 +30,25 @@ export function renderCalendar(cycles, jy, jm, today) {
   const logged = model.days.filter((day) => day.logged).map((day) => toFaDigits(day.jd));
   const title = `${J_MONTHS[jm - 1]} ${toFaDigits(jy)}`;
   const span = `از ${formatGregorian(first)} تا ${formatGregorian(last)}`;
-  const loggedLine = logged.length ? `روزهای ثبت‌شده: ${logged.join("، ")}` : "این ماه هنوز روز ثبت‌شده‌ای ندارد.";
+  const loggedLine = logged.length ? `تیک‌خورده: ${logged.join("، ")}` : "این ماه هنوز روزی تیک نخورده.";
+  const todayDay = model.days.find((day) => day.today);
+  const todayLine = todayDay?.logged ? "امروز هم تیک خورده." : "";
+  const predict = model.stats.usedDefaultPeriod
+    ? "~ فقط روزِ احتمالیِ شروع را نشان می‌دهد، چون هنوز پایانی ثبت نشده."
+    : "~ پیش‌بینی است، از روی مدت‌هایی که خودت ثبت کرده‌ای.";
+  const nextLine = model.next
+    ? `شروع بعدی، حدود ${toFaDigits(toJalali(model.next).jd)} ${J_MONTHS[toJalali(model.next).jm - 1]}.`
+    : "با اولین «ثبت شروع»، پیش‌بینی روی تقویم می‌آید.";
   const text = [
-    `نیایش جان، تقویم ${title}.`,
+    `جان، تقویم ${title}.`,
     span,
     `<pre>${rows.join("\n")}</pre>`,
-    "+ ثبت‌شده    ~ پیش‌بینی    . سه روز قبل    * امروز",
+    "✓ ثبت‌شده    * امروز    · سه روز قبل",
+    predict,
     loggedLine,
-    model.next ? `شروع بعدی، حدود ${toFaDigits(toJalali(model.next).jd)} ${J_MONTHS[toJalali(model.next).jm - 1]}.` : "با اولین «ثبت شروع»، پیش‌بینی روی تقویم می‌آید.",
-  ].join("\n");
+    todayLine,
+    nextLine,
+  ].filter(Boolean).join("\n");
   const prev = jm === 1 ? { y: jy - 1, m: 12 } : { y: jy, m: jm - 1 };
   const next = jm === 12 ? { y: jy + 1, m: 1 } : { y: jy, m: jm + 1 };
   return {

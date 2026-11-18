@@ -2,10 +2,45 @@ import { renderCalendar } from "./calendar.js";
 import { forecast, openCycle } from "./cycle.js";
 import { formatDual, formatJalali, parseDate, tehranToday, toJalali } from "./dates.js";
 import { searchHint, searchKnowledge } from "./knowledge.js";
-import { MEDICINE_URL, phaseOf, reminder, savedEnd, savedStart, statusText, tip, welcome } from "./phrases.js";
+import { MEDICINE_URL, phaseOf, savedEnd, savedStart, statusText, tip, welcome } from "./phrases.js";
 
 export function emptyState() {
-  return { version: 1, ownerChatId: null, offset: 0, nextId: 1, cycles: [], pending: null, sent: {} };
+  return { version: 2, offset: 0, users: {} };
+}
+
+function blankUser() {
+  return { nextId: 1, cycles: [], pending: null, sent: {}, tipCursor: 0, welcomed: false };
+}
+
+export function migrate(raw) {
+  if (!raw || typeof raw !== "object") return emptyState();
+  if (raw.users && raw.version === 2) {
+    if (typeof raw.offset !== "number") raw.offset = 0;
+    return raw;
+  }
+  const users = {};
+  if (raw.ownerChatId) {
+    users[String(raw.ownerChatId)] = {
+      nextId: raw.nextId || 1,
+      cycles: Array.isArray(raw.cycles) ? raw.cycles : [],
+      pending: raw.pending || null,
+      sent: raw.sent && typeof raw.sent === "object" ? raw.sent : {},
+      tipCursor: 0,
+      welcomed: true,
+    };
+  }
+  const offset = Number(raw.offset) || 0;
+  for (const key of Object.keys(raw)) delete raw[key];
+  raw.version = 2;
+  raw.offset = offset;
+  raw.users = users;
+  return raw;
+}
+
+function userOf(state, chatId) {
+  const key = String(chatId);
+  if (!state.users[key]) state.users[key] = blankUser();
+  return state.users[key];
 }
 
 export const MAIN_KEYBOARD = {
@@ -38,30 +73,30 @@ function norm(text) {
     .trim();
 }
 
-function findCycle(state, id) {
-  return state.cycles.find((cycle) => cycle.id === String(id));
+function findCycle(user, id) {
+  return user.cycles.find((cycle) => cycle.id === String(id));
 }
 
-function addStart(state, iso) {
-  if (openCycle(state.cycles)) return { error: "یک عادت هنوز باز است. اول «ثبت پایان» را بزن، یا از تاریخ‌ها اصلاحش کن." };
-  if (state.cycles.some((cycle) => cycle.start === iso)) return { error: "این شروع را قبلاً نوشته‌ام." };
-  const cycle = { id: String(state.nextId), start: iso, end: null, note: "" };
-  state.nextId += 1;
-  state.cycles.push(cycle);
+function addStart(user, iso) {
+  if (openCycle(user.cycles)) return { error: "یک عادت هنوز باز است. اول «ثبت پایان» را بزن، یا از تاریخ‌ها اصلاحش کن. ماه‌های بسته را هر چند بار که بخواهی می‌توانی ثبت کنی." };
+  if (user.cycles.some((cycle) => cycle.start === iso)) return { error: "این شروع را قبلاً نوشته‌ام." };
+  const cycle = { id: String(user.nextId), start: iso, end: null, note: "" };
+  user.nextId += 1;
+  user.cycles.push(cycle);
   return { cycle };
 }
 
-function closeLatest(state, iso) {
-  const cycle = openCycle(state.cycles);
+function closeLatest(user, iso) {
+  const cycle = openCycle(user.cycles);
   if (!cycle) return { error: "عادتِ بازی نداریم. اگر شروع را نزده‌ای، اول «ثبت شروع» را بزن." };
   if (iso < cycle.start) return { error: "پایان نمی‌تواند قبل از شروع باشد." };
   cycle.end = iso;
   return { cycle };
 }
 
-function listText(state) {
-  const cycles = [...state.cycles].sort((a, b) => b.start.localeCompare(a.start)).slice(0, 12);
-  if (!cycles.length) return { text: "هنوز تاریخی نیست.", inline: undefined };
+function listText(user) {
+  const cycles = [...user.cycles].sort((a, b) => b.start.localeCompare(a.start)).slice(0, 12);
+  if (!cycles.length) return { text: "هنوز تاریخی نیست. هر وقت شروع شد، «ثبت شروع» را بزن.", inline: undefined };
   const lines = cycles.map((cycle) => {
     const end = cycle.end ? formatJalali(cycle.end) : "باز";
     const note = cycle.note ? `، ${esc(cycle.note)}` : "";
@@ -74,7 +109,7 @@ function listText(state) {
       { text: `حذف ${cycle.id}`, callback_data: `del:${cycle.id}` },
     ]),
   };
-  return { text: `تاریخ‌ها، جدیدترها بالا:\n${lines.join("\n")}\nبرای اصلاح، دکمه‌ی همان شماره را بزن.`, inline };
+  return { text: `تاریخ‌های تو، جدیدترها بالا:\n${lines.join("\n")}\nبرای اصلاح، دکمه‌ی همان شماره را بزن. هر ماه می‌توانی یکی دیگر اضافه کنی.`, inline };
 }
 
 function menuButton(text) {
@@ -82,37 +117,23 @@ function menuButton(text) {
 }
 
 export function step(raw, event, now = new Date()) {
-  const state = structuredClone(raw);
+  const state = migrate(structuredClone(raw));
   const today = tehranToday(now);
   const chatId = event.chatId;
   const text = norm(event.text || "");
   const data = event.data || "";
   const replies = [];
-
-  if (!state.ownerChatId) {
-    if (text === "/start" || text === "شروع دفتر") {
-      state.ownerChatId = chatId;
-      replies.push(reply(welcome(false)));
-      return { state, replies };
-    }
-    replies.push(reply("این دفترچه هنوز مال کسی نشده. نیایش جان، /start را بزن تا فقط برای تو بماند.", { inline: undefined }));
-    replies[0].keyboard = undefined;
-    return { state, replies };
-  }
-
-  if (chatId !== state.ownerChatId) {
-    return { state, replies: [{ text: "این دفترچه مال نیایش است.", keyboard: undefined }] };
-  }
+  const user = userOf(state, chatId);
 
   if (data.startsWith("cal:")) {
     const [, year, month] = data.split(":");
-    const view = renderCalendar(state.cycles, Number(year), Number(month), today);
+    const view = renderCalendar(user.cycles, Number(year), Number(month), today);
     replies.push({ text: view.text, inline: view.inline });
     return { state, replies };
   }
 
   if (data.startsWith("del:")) {
-    const cycle = findCycle(state, data.slice(4));
+    const cycle = findCycle(user, data.slice(4));
     if (!cycle) replies.push(reply("این شماره را پیدا نکردم."));
     else {
       replies.push({
@@ -128,9 +149,9 @@ export function step(raw, event, now = new Date()) {
 
   if (data.startsWith("yesdel:")) {
     const id = data.slice(7);
-    const before = state.cycles.length;
-    state.cycles = state.cycles.filter((cycle) => cycle.id !== id);
-    replies.push(reply(state.cycles.length === before ? "قبلاً پاک شده بود." : "پاک شد. تقویم هم خودش را با همین حساب تازه می‌کند."));
+    const before = user.cycles.length;
+    user.cycles = user.cycles.filter((cycle) => cycle.id !== id);
+    replies.push(reply(user.cycles.length === before ? "قبلاً پاک شده بود." : "پاک شد. تقویم هم با همین حساب تازه می‌شود. هر وقت خواستی دوباره ثبت کن."));
     return { state, replies };
   }
 
@@ -142,32 +163,31 @@ export function step(raw, event, now = new Date()) {
   if (data.startsWith("edits:") || data.startsWith("edite:")) {
     const kind = data.startsWith("edits:") ? "edit-start" : "edit-end";
     const id = data.split(":")[1];
-    if (!findCycle(state, id)) replies.push(reply("این شماره را پیدا نکردم."));
+    if (!findCycle(user, id)) replies.push(reply("این شماره را پیدا نکردم."));
     else {
-      state.pending = { kind, id };
+      user.pending = { kind, id };
       replies.push(reply("تاریخ تازه را بفرست. مثلاً ۱۴۰۵/۰۸/۲۷ یا 2026-11-18 یا امروز. اگر منصرف شدی، «بیخیال» را بنویس."));
     }
     return { state, replies };
   }
 
   if (text === "بیخیال") {
-    state.pending = null;
+    user.pending = null;
     replies.push(reply("باشد. هیچ‌چیز عوض نشد."));
     return { state, replies };
   }
 
   if (text === "آزادش کن") {
-    state.ownerChatId = null;
-    state.pending = null;
-    replies.push({ text: "دفترچه آزاد شد. نفر بعدی که /start بزند صاحبش می‌شود. نیایش از گوشی خودش این کار را بکند.", keyboard: { remove_keyboard: true } });
+    user.pending = null;
+    replies.push(reply("دفترچه قفل نیست. هر کس از گوشی خودش دفترچه‌ی جدا دارد و هر ماه می‌تواند دوباره ثبت کند. برای پاک کردن یک تاریخ، «تاریخ‌ها» را بزن."));
     return { state, replies };
   }
 
-  if (menuButton(text)) state.pending = null;
+  if (menuButton(text)) user.pending = null;
 
-  if (state.pending && !text.startsWith("/")) {
-    if (state.pending.kind === "search") {
-      state.pending = null;
+  if (user.pending && !text.startsWith("/")) {
+    if (user.pending.kind === "search") {
+      user.pending = null;
       replies.push(reply(searchKnowledge(text) || `برای «${esc(text)}» یادداشت آماده‌ای ندارم.\n${searchHint()}`));
       return { state, replies };
     }
@@ -176,93 +196,98 @@ export function step(raw, event, now = new Date()) {
       replies.push(reply("این تاریخ را نخواندم. یک بار دیگر، مثل ۱۴۰۵/۰۸/۲۷ یا ۲۷ آبان ۱۴۰۵."));
       return { state, replies };
     }
-    const cycle = findCycle(state, state.pending.id);
+    const cycle = findCycle(user, user.pending.id);
     if (!cycle) {
-      state.pending = null;
+      user.pending = null;
       replies.push(reply("آن مورد دیگر در دفترچه نیست."));
       return { state, replies };
     }
-    if (state.pending.kind === "edit-start") {
+    if (user.pending.kind === "edit-start") {
       if (cycle.end && iso > cycle.end) replies.push(reply("شروع بعد از پایان نمی‌شود."));
       else {
         cycle.start = iso;
-        state.pending = null;
+        user.pending = null;
         replies.push(reply(`شروع را عوض کردم: ${formatDual(iso)}`));
       }
     } else {
       if (iso < cycle.start) replies.push(reply("پایان قبل از شروع نمی‌شود."));
       else {
         cycle.end = iso;
-        state.pending = null;
+        user.pending = null;
         replies.push(reply(`پایان را عوض کردم: ${formatDual(iso)}`));
       }
     }
     return { state, replies };
   }
 
-  if (text === "/start") {
-    replies.push(reply(welcome(true)));
+  if (text === "/start" || text === "شروع دفتر") {
+    const returning = user.welcomed || user.cycles.length > 0;
+    user.welcomed = true;
+    replies.push(reply(welcome(returning)));
     return { state, replies };
   }
 
   if (text === "راهنما" || text === "/help") {
+    user.welcomed = true;
     replies.push(reply([
-      "ثبت شروع و ثبت پایان، برای امروز.",
+      "ثبت شروع و ثبت پایان، برای امروز. هر ماه می‌توانی یکی دیگر بنویسی.",
       "اگر تاریخ دیگری است: شروع ۱۴۰۵/۰۸/۲۷ یا پایان دیروز.",
       "تاریخ‌ها را می‌شود ویرایش یا حذف کرد.",
-      "تقویم، شمسی است و کنارش میلادی را هم می‌نویسد.",
-      "جستجو، از یادداشت‌های همین دفترچه جواب می‌دهد، نه از یک صفحه‌ی ناشناس.",
-      "داروها در ربات جدا یادآوری می‌شوند.",
+      "تقویم شمسی است. روزهای ثبت‌شده تیک می‌خورند و کنارش میلادی را هم می‌نویسد.",
+      "نکته هر بار یک حرف تازه می‌زند. جستجو از یادداشت‌های همین دفترچه جواب می‌دهد.",
+      "دفترچه‌ی هر کس جداست. داروها در ربات جدا یادآوری می‌شوند.",
     ].join("\n")));
     return { state, replies };
   }
 
   if (text === "داروها" || text === "دارو") {
-    replies.push(reply(`نیایش جان، قرص‌ها و ویتامین‌ها را همان ربات قبلی یادت می‌آورد تا با این دفترچه قاطی نشود.\n${MEDICINE_URL}`));
+    replies.push(reply(`جان، قرص‌ها و ویتامین‌ها را همان ربات قبلی یادت می‌آورد تا با این دفترچه قاطی نشود.\n${MEDICINE_URL}`));
     return { state, replies };
   }
 
   if (text === "وضعیت" || text === "/status") {
-    replies.push(reply(statusText(forecast(state.cycles, today), today)));
+    replies.push(reply(statusText(forecast(user.cycles, today), today)));
     return { state, replies };
   }
 
   if (text === "نکته" || text === "/tip") {
-    const cast = forecast(state.cycles, today);
-    replies.push(reply(tip(phaseOf(cast, today), today)));
+    const cast = forecast(user.cycles, today);
+    const cursor = user.tipCursor || 0;
+    user.tipCursor = cursor + 1;
+    replies.push(reply(tip(phaseOf(cast, today), cursor)));
     return { state, replies };
   }
 
   if (text === "تقویم" || text === "/calendar") {
     const nowJ = toJalali(today);
-    const view = renderCalendar(state.cycles, nowJ.jy, nowJ.jm, today);
+    const view = renderCalendar(user.cycles, nowJ.jy, nowJ.jm, today);
     replies.push({ text: view.text, inline: view.inline, keyboard: MAIN_KEYBOARD });
     return { state, replies };
   }
 
   if (text === "تاریخ‌ها" || text === "تاریخها" || text === "/dates") {
-    const view = listText(state);
+    const view = listText(user);
     replies.push({ text: view.text, inline: view.inline, keyboard: MAIN_KEYBOARD });
     return { state, replies };
   }
 
   if (text === "جستجو" || text === "/search") {
-    state.pending = { kind: "search" };
+    user.pending = { kind: "search" };
     replies.push(reply(searchHint()));
     return { state, replies };
   }
 
   if (text.startsWith("جستجو ")) {
-    const query = text.slice(7);
+    const query = text.slice("جستجو ".length);
     replies.push(reply(searchKnowledge(query) || `برای «${esc(query)}» یادداشت آماده‌ای ندارم.\n${searchHint()}`));
     return { state, replies };
   }
 
   if (text.startsWith("یادداشت ")) {
-    const cycle = [...state.cycles].sort((a, b) => b.start.localeCompare(a.start))[0];
+    const cycle = [...user.cycles].sort((a, b) => b.start.localeCompare(a.start))[0];
     if (!cycle) replies.push(reply("اول یک تاریخ ثبت کن، بعد یادداشت را بگو."));
     else {
-      cycle.note = text.slice(8).slice(0, 80);
+      cycle.note = text.slice("یادداشت ".length).slice(0, 80);
       replies.push(reply(`یادداشت را برای ${formatJalali(cycle.start)} گذاشتم.`));
     }
     return { state, replies };
@@ -273,7 +298,7 @@ export function step(raw, event, now = new Date()) {
     const iso = parseDate(startMatch[1] || "امروز", today);
     if (!iso) replies.push(reply("تاریخ شروع را نخواندم. بنویس: شروع ۱۴۰۵/۰۸/۲۷"));
     else {
-      const result = addStart(state, iso);
+      const result = addStart(user, iso);
       replies.push(reply(result.error || savedStart(iso)));
     }
     return { state, replies };
@@ -284,7 +309,7 @@ export function step(raw, event, now = new Date()) {
     const iso = parseDate(endMatch[1] || "امروز", today);
     if (!iso) replies.push(reply("تاریخ پایان را نخواندم."));
     else {
-      const result = closeLatest(state, iso);
+      const result = closeLatest(user, iso);
       replies.push(reply(result.error || savedEnd(result.cycle)));
     }
     return { state, replies };
@@ -292,7 +317,7 @@ export function step(raw, event, now = new Date()) {
 
   const remove = text.match(/^حذف\s+(\d+)$/);
   if (remove) {
-    const cycle = findCycle(state, remove[1]);
+    const cycle = findCycle(user, remove[1]);
     if (!cycle) replies.push(reply("این شماره در فهرست نیست. «تاریخ‌ها» را بزن."));
     else replies.push({
       text: `این را پاک کنم؟\n${formatDual(cycle.start)}`,
@@ -301,6 +326,12 @@ export function step(raw, event, now = new Date()) {
         { text: "نه", callback_data: "nodel" },
       ]] },
     });
+    return { state, replies };
+  }
+
+  if (!user.welcomed) {
+    user.welcomed = true;
+    replies.push(reply(welcome(false)));
     return { state, replies };
   }
 

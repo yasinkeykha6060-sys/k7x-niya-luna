@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { addDays, daysBetween, isValidJalali, parseDate, tehranToday, toFaDigits, toGregorian, toJalali } from "../src/dates.js";
-import { cycleStats, dueReminders, forecast } from "../src/cycle.js";
-import { emptyState, step } from "../src/logic.js";
+import { cycleStats, dueReminders, forecast, monthModel } from "../src/cycle.js";
+import { emptyState, migrate, step } from "../src/logic.js";
+import { reminder, tip } from "../src/phrases.js";
 import { open, seal } from "../src/store.js";
 import { randomBytes } from "node:crypto";
 
@@ -48,40 +49,98 @@ test("cycle length ignores a wild gap and reminders fire once", () => {
   const stats = cycleStats(cycles);
   assert.equal(stats.skipped.length, 1);
   assert.equal(stats.cycleLen, 28);
+  assert.equal(stats.periodLen, 5);
   assert.equal(forecast(cycles, "2026-11-18").next, "2026-11-25");
   const first = dueReminders(cycles, {}, "2026-11-22", 10);
   assert.equal(first[0].kind, "d3");
-  const sent = { [first[0].key]: "2026-11-18" };
-  assert.equal(dueReminders(cycles, sent, "2026-11-18", 10).length, 0);
-  assert.equal(dueReminders(cycles, {}, "2026-11-18", 2).length, 0);
+  assert.equal(dueReminders(cycles, {}, "2026-11-24", 9)[0].kind, "d1");
+  assert.equal(dueReminders(cycles, {}, "2026-11-25", 21)[0].kind, "d0");
+  assert.equal(dueReminders(cycles, {}, "2026-11-22", 8).length, 0);
+  assert.equal(dueReminders(cycles, {}, "2026-11-22", 22).length, 0);
+  const sent = { [first[0].key]: "2026-11-22" };
+  assert.equal(dueReminders(cycles, sent, "2026-11-22", 10).length, 0);
+  const open = [...cycles, { id: "8", start: "2026-11-20", end: null }];
+  assert.equal(dueReminders(open, {}, "2026-11-22", 10).length, 0);
   assert.equal(daysBetween("2026-11-18", "2026-11-21"), 3);
+  const unseen = monthModel([{ id: "1", start: "2026-10-28", end: null }], 1405, 9, "2026-11-18");
+  assert.equal(unseen.stats.periodLen, null);
+  assert.equal(unseen.days.filter((day) => day.predicted).length, 1);
+  const known = monthModel(cycles, 1405, 9, "2026-11-18");
+  assert.equal(known.days.filter((day) => day.predicted).length, 5);
 });
 
-test("logging, editing, deleting and searching stay consistent", () => {
+test("each person keeps a reusable journal, with checks and fresh tips", () => {
   let state = emptyState();
   state = step(state, { chatId: 7, text: "/start" }, noon).state;
   state = step(state, { chatId: 7, text: "شروع ۱۴۰۵/۰۸/۰۱" }, noon).state;
   let result = step(state, { chatId: 7, text: "پایان ۱۴۰۵/۰۸/۰۵" }, noon);
   state = result.state;
   assert.match(result.replies[0].text, /آبان/);
-  assert.equal(state.cycles[0].end, toGregorian(1405, 8, 5));
+  assert.match(result.replies[0].text, /یاسین خیلی دوستت داره/);
+  assert.equal(state.users["7"].cycles[0].end, toGregorian(1405, 8, 5));
   result = step(state, { chatId: 7, text: "وضعیت" }, noon);
   assert.match(result.replies[0].text, /۲۸ روز/);
+  assert.doesNotMatch(result.replies[0].text, /طول عادت/);
+  assert.doesNotMatch(result.replies[0].text, /۵ روز/);
+  result = step(state, { chatId: 7, text: "شروع ۱۴۰۵/۰۹/۰۱" }, noon);
+  state = result.state;
+  result = step(state, { chatId: 7, text: "پایان ۱۴۰۵/۰۹/۰۴" }, noon);
+  state = result.state;
+  assert.equal(state.users["7"].cycles.length, 2);
+  result = step(state, { chatId: 9, text: "شروع ۱۴۰۵/۰۷/۱۰" }, noon);
+  state = result.state;
+  assert.equal(state.users["9"].cycles.length, 1);
+  assert.equal(state.users["7"].cycles.length, 2);
   result = step(state, { chatId: 9, text: "وضعیت" }, noon);
-  assert.match(result.replies[0].text, /مال نیایش/);
-  result = step(state, { chatId: 7, data: "edits:1" }, noon);
-  state = result.state;
-  result = step(state, { chatId: 7, text: "1405/08/02" }, noon);
-  state = result.state;
-  assert.equal(state.cycles[0].start, toGregorian(1405, 8, 2));
+  assert.match(result.replies[0].text, /مهر/);
+  assert.doesNotMatch(result.replies[0].text, /آبان/);
+  result = step(state, { chatId: 7, text: "تقویم" }, noon);
+  assert.match(result.replies[0].text, /✓/);
+  assert.match(result.replies[0].text, /تیک‌خورده/);
+  result = step(state, { chatId: 7, text: "نکته" }, noon);
+  const firstTip = result.replies[0].text;
+  result = step(result.state, { chatId: 7, text: "نکته" }, noon);
+  assert.notEqual(firstTip, result.replies[0].text);
+  assert.match(firstTip, /مراقب خودت باش/);
+  assert.match(firstTip, /یاسین خیلی دوستت داره/);
+  assert.doesNotMatch(`${firstTip}\n${result.replies[0].text}`, /مفیدترین نسخه‌ی خودت/);
+  state = step(state, { chatId: 7, data: "edits:1" }, noon).state;
+  state = step(state, { chatId: 7, text: "1405/08/02" }, noon).state;
+  assert.equal(state.users["7"].cycles[0].start, toGregorian(1405, 8, 2));
   result = step(state, { chatId: 7, data: "yesdel:1" }, noon);
-  assert.equal(result.state.cycles.length, 0);
+  assert.equal(result.state.users["7"].cycles.length, 1);
+  assert.equal(result.state.users["9"].cycles.length, 1);
   result = step(result.state, { chatId: 7, text: "جستجو درد" }, noon);
   assert.match(result.replies[0].text, /پزشک/);
   result = step(emptyState(), { chatId: 3, text: "سلام" }, noon);
-  assert.match(result.replies[0].text, /\/start/);
+  assert.match(result.replies[0].text, /دفترچه/);
+  assert.equal(result.state.users["3"].welcomed, true);
   assert.equal(toFaDigits(27), "۲۷");
   assert.equal(tehranToday(noon), "2026-11-18");
+});
+
+test("tips and reminders stay warm, varied, and free of a fixed period length", () => {
+  const seen = new Set();
+  for (let cursor = 0; cursor < 24; cursor += 1) seen.add(tip("period", cursor));
+  assert.ok(seen.size >= 12);
+  const all = ["soon", "period", "mid", "calm"].flatMap((phase) => Array.from({ length: 16 }, (_, cursor) => tip(phase, cursor)));
+  for (const text of all) {
+    assert.match(text, /مراقب خودت باش\. یاسین خیلی دوستت داره\./);
+    assert.doesNotMatch(text, /مفیدترین نسخه‌ی خودت/);
+    assert.doesNotMatch(text, /۵ روز/);
+  }
+  assert.ok(all.some((text) => text.includes("سوپ") || text.includes("آش")));
+  for (const kind of ["d3", "d1", "d0"]) {
+    const text = reminder({ kind, next: "2026-11-25", key: `${kind}:2026-11-25`, approximate: false });
+    assert.match(text, /آذر/);
+    assert.match(text, /یاسین خیلی دوستت داره/);
+    assert.doesNotMatch(text, /مفیدترین نسخه‌ی خودت/);
+  }
+  const old = { version: 1, ownerChatId: 4, offset: 9, nextId: 3, cycles: [{ id: "1", start: "2026-11-01" }], pending: null, sent: {} };
+  const moved = migrate(old);
+  assert.equal(moved.offset, 9);
+  assert.equal(moved.users["4"].cycles[0].start, "2026-11-01");
+  assert.equal(moved.ownerChatId, undefined);
 });
 
 test("the journal seals and opens without leaking plaintext", () => {

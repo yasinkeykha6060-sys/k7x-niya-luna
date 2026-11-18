@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { emptyState } from "./logic.js";
+import { emptyState, migrate } from "./logic.js";
 
 const FILE = "data/state.enc";
 
@@ -27,7 +27,7 @@ export function open(payload, key) {
 
 export function load(hex = process.env.DATA_KEY) {
   if (!existsSync(FILE)) return emptyState();
-  return open(readFileSync(FILE, "utf8"), keyFrom(hex));
+  return migrate(open(readFileSync(FILE, "utf8"), keyFrom(hex)));
 }
 
 export function save(state, hex = process.env.DATA_KEY) {

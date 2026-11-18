@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: moon-journal
@@ -15,7 +16,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 330
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,7 +34,7 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           DATA_KEY: ${{ secrets.DATA_KEY }}
-          WATCH_SECONDS: "17400"
+          WATCH_SECONDS: "16800"
           AUTO_PUSH: "1"
         run: |
           git config user.name "github-actions[bot]"
@@ -57,4 +58,12 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run bot.yml --ref main
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if gh workflow run bot.yml --ref main; then
+              exit 0
+            fi
+            echo "Handoff attempt $attempt did not start the next run."
+            sleep 15
+          done
+          exit 1
