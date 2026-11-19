@@ -22,20 +22,42 @@ function defaultSend(call, chatId, message) {
   return call("sendMessage", body);
 }
 
+async function deliverResult(state, result, replyChatId, send) {
+  Object.assign(state, result.state);
+  for (const message of result.replies) await send(replyChatId, message);
+  for (const copy of result.copies || []) {
+    if (!copy?.chatId || !copy.text) continue;
+    try {
+      await send(copy.chatId, { text: copy.text, keyboard: MAIN_KEYBOARD });
+    } catch {
+      state.partnerQueue = state.partnerQueue || [];
+      if (state.partnerQueue.length < 30) state.partnerQueue.push(copy.text);
+    }
+  }
+}
+
 async function handleUpdate(state, update, now, send, call) {
   if (update.callback_query) {
     const query = update.callback_query;
+    if (query.message?.chat?.type && query.message.chat.type !== "private") return;
     try { await call("answerCallbackQuery", { callback_query_id: query.id }); } catch { /* the reply still goes out */ }
-    const result = step(state, { chatId: query.message.chat.id, data: query.data, text: "" }, now);
-    Object.assign(state, result.state);
-    for (const message of result.replies) await send(query.message.chat.id, message);
+    const result = step(state, {
+      chatId: query.message.chat.id,
+      data: query.data,
+      text: "",
+      username: query.from?.username || "",
+    }, now);
+    await deliverResult(state, result, query.message.chat.id, send);
     return;
   }
   const message = update.message;
-  if (!message?.chat?.id) return;
-  const result = step(state, { chatId: message.chat.id, text: message.text || "" }, now);
-  Object.assign(state, result.state);
-  for (const item of result.replies) await send(message.chat.id, item);
+  if (!message?.chat?.id || (message.chat.type && message.chat.type !== "private")) return;
+  const result = step(state, {
+    chatId: message.chat.id,
+    text: message.text || "",
+    username: message.from?.username || "",
+  }, now);
+  await deliverResult(state, result, message.chat.id, send);
 }
 
 async function remind(state, now, send, log) {
@@ -48,6 +70,11 @@ async function remind(state, now, send, log) {
       try {
         await send(Number(chatId), { text: reminder(item), keyboard: MAIN_KEYBOARD });
         user.sent[item.key] = today;
+        if (String(chatId) === String(state.homeChatId) && state.partner?.chatId && String(state.partner.chatId) !== String(chatId)) {
+          try {
+            await send(Number(state.partner.chatId), { text: `یادآوری نیایش:\n${reminder(item)}`, keyboard: MAIN_KEYBOARD });
+          } catch { /* her reminder already stands */ }
+        }
       } catch (error) {
         log(error.message || "یادآوری نرفت");
       }

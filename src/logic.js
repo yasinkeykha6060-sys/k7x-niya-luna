@@ -4,8 +4,34 @@ import { formatDual, formatJalali, parseDate, tehranToday, toJalali } from "./da
 import { searchHint, searchKnowledge } from "./knowledge.js";
 import { MEDICINE_URL, petName, phaseOf, savedEnd, savedStart, statusText, tip, welcome } from "./phrases.js";
 
+export const PARTNER_USERNAME = "yasin48844";
+
 export function emptyState() {
-  return { version: 2, offset: 0, revision: 0, users: {} };
+  return {
+    version: 2,
+    offset: 0,
+    revision: 0,
+    users: {},
+    homeChatId: null,
+    partner: { username: PARTNER_USERNAME, chatId: null },
+    partnerQueue: [],
+  };
+}
+
+function ensureWatch(state) {
+  if (!state.partner || typeof state.partner !== "object") state.partner = { username: PARTNER_USERNAME, chatId: null };
+  state.partner.username = PARTNER_USERNAME;
+  if (state.partner.chatId) state.partner.chatId = String(state.partner.chatId);
+  if (!Array.isArray(state.partnerQueue)) state.partnerQueue = [];
+  if (state.homeChatId) state.homeChatId = String(state.homeChatId);
+  if (state.homeChatId && state.homeChatId === state.partner.chatId) state.homeChatId = null;
+  if (!state.homeChatId) {
+    const ids = Object.keys(state.users || {}).filter((id) => id !== state.partner.chatId);
+    const withCycles = ids.filter((id) => state.users[id]?.cycles?.length);
+    if (withCycles.length === 1) state.homeChatId = withCycles[0];
+    else if (ids.length === 1) state.homeChatId = ids[0];
+  }
+  return state;
 }
 
 function blankUser() {
@@ -25,7 +51,7 @@ export function migrate(raw) {
       user.rev = Number(user.rev) || 0;
       if (!user.nextId) user.nextId = 1;
     }
-    return raw;
+    return ensureWatch(raw);
   }
   const users = {};
   if (raw.ownerChatId) {
@@ -45,7 +71,7 @@ export function migrate(raw) {
   raw.version = 2;
   raw.offset = offset;
   raw.users = users;
-  return raw;
+  return ensureWatch(raw);
 }
 
 function userOf(state, chatId) {
@@ -105,7 +131,32 @@ function closeLatest(user, iso) {
   return { cycle };
 }
 
-function listText(user) {
+function isPartner(event) {
+  return String(event.username || "").replace(/^@/, "").trim().toLowerCase() === PARTNER_USERNAME;
+}
+
+function changeNote(beforeMap, user, byPartner) {
+  const after = new Map(user.cycles.map((cycle) => [cycle.id, cycle]));
+  const lines = [];
+  for (const [id, prev] of beforeMap) {
+    const cycle = after.get(id);
+    if (!cycle) lines.push(`حذف شد: ${formatDual(prev.start)}`);
+    else if (JSON.stringify({ ...prev, rev: undefined }) !== JSON.stringify({ ...cycle, rev: undefined })) {
+      const end = cycle.end ? ` تا ${formatJalali(cycle.end)}` : "، هنوز باز";
+      lines.push(`عوض شد: ${formatDual(cycle.start)}${end}`);
+    }
+  }
+  for (const [id, cycle] of after) {
+    if (beforeMap.has(id)) continue;
+    const end = cycle.end ? ` تا ${formatJalali(cycle.end)}` : "";
+    lines.push(`ثبت شد: شروع ${formatDual(cycle.start)}${end}`);
+  }
+  if (!lines.length) return "";
+  const head = byPartner ? "یاسین در دفترچه‌ی نیایش نوشت." : "نیایش در دفترچه ثبت کرد.";
+  return `${head}\n${lines.join("\n")}`;
+}
+
+function listText(user, partnerView) {
   const cycles = [...user.cycles].sort((a, b) => b.start.localeCompare(a.start)).slice(0, 12);
   if (!cycles.length) return { text: "هنوز تاریخی نیست. هر وقت شروع شد، «ثبت شروع» را بزن.", inline: undefined };
   const lines = cycles.map((cycle) => {
@@ -120,7 +171,8 @@ function listText(user) {
       { text: `حذف ${cycle.id}`, callback_data: `del:${cycle.id}` },
     ]),
   };
-  return { text: `تاریخ‌های تو، جدیدترها بالا:\n${lines.join("\n")}\nبرای اصلاح، دکمه‌ی همان شماره را بزن. هر ماه می‌توانی یکی دیگر اضافه کنی.`, inline };
+  const title = partnerView ? "تاریخ‌های نیایش، جدیدترها بالا:" : "تاریخ‌های تو، جدیدترها بالا:";
+  return { text: `${title}\n${lines.join("\n")}\nبرای اصلاح، دکمه‌ی همان شماره را بزن. هر ماه می‌توانی یکی دیگر اضافه کنی.`, inline };
 }
 
 function menuButton(text) {
@@ -134,7 +186,20 @@ export function step(raw, event, now = new Date()) {
   const text = norm(event.text || "");
   const data = event.data || "";
   const replies = [];
-  const user = userOf(state, chatId);
+  const partner = isPartner(event);
+  if (partner) {
+    state.partner.chatId = String(chatId);
+    if (String(state.homeChatId) === String(chatId)) state.homeChatId = null;
+  } else if (event.private !== false && !state.homeChatId) {
+    state.homeChatId = String(chatId);
+  }
+  if (partner && !state.homeChatId) {
+    const waiting = state.partnerQueue.splice(0);
+    replies.push(reply(["دفترچه‌ی نیایش اینجاست.", "هر چه ثبت کند همین‌جا می‌آید و از همین دکمه‌ها می‌توانی تاریخ‌هایش را عوض کنی.", "هنوز از طرف او تاریخی نرسیده.", ...waiting].filter(Boolean).join("\n")));
+    return { state, replies, copies: [] };
+  }
+  const journalId = partner ? String(state.homeChatId) : String(chatId);
+  const user = userOf(state, journalId);
   const beforeIds = new Set(user.cycles.map((cycle) => cycle.id));
   const beforeCycles = new Map(user.cycles.map((cycle) => [cycle.id, { ...cycle }]));
   const beforeCore = JSON.stringify({
@@ -168,7 +233,20 @@ export function step(raw, event, now = new Date()) {
         if (body !== prevBody) cycle.rev = user.rev;
       }
     }
-    return { state, replies: items };
+    const note = afterCore === beforeCore ? "" : changeNote(beforeCycles, user, partner);
+    const copies = [];
+    if (note && partner && state.homeChatId) copies.push({ chatId: state.homeChatId, text: note });
+    if (note && !partner && String(chatId) === String(state.homeChatId)) {
+      if (state.partner.chatId) copies.push({ chatId: state.partner.chatId, text: note });
+      else if (state.partnerQueue.length < 30) state.partnerQueue.push(note);
+    }
+    return { state, replies: items, copies };
+  }
+
+  if (partner && (text === "/start" || text === "شروع دفتر")) {
+    const waiting = state.partnerQueue.splice(0);
+    replies.push(reply(["دفترچه‌ی نیایش اینجاست.", "هر چه ثبت کند همین‌جا می‌آید.", "وضعیت، تقویم و تاریخ‌ها مالِ اوست و می‌توانی عوضشان کنی.", ...waiting].filter(Boolean).join("\n")));
+    return done(replies);
   }
 
   if (data.startsWith("cal:")) {
@@ -312,7 +390,7 @@ export function step(raw, event, now = new Date()) {
   }
 
   if (text === "تاریخ‌ها" || text === "تاریخها" || text === "/dates") {
-    const view = listText(user);
+    const view = listText(user, partner);
     replies.push({ text: view.text, inline: view.inline, keyboard: MAIN_KEYBOARD });
     return done(replies);
   }
