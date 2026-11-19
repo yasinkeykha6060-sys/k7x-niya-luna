@@ -44,10 +44,11 @@ function scripted({ updates, watchSeconds, now = () => morning, send, onCall }) 
 
 test("a dropped connection still keeps the journal and the listener stays up", async () => {
   const state = emptyState();
-  const queue = [new Error("قطع شد"), [{ update_id: 4, message: { chat: { id: 5 }, text: "ثبت شروع" } }]];
+  const queue = [new Error("قطع شد"), [{ update_id: 4, message: { chat: { id: 5 }, from: { first_name: "نیایش" }, text: "شروع امروز" } }]];
   const { result, sent } = await scripted({ updates: { state, queue }, watchSeconds: 70 });
   assert.equal(result.reason, "complete");
   assert.equal(state.users["5"].cycles.length, 1);
+  assert.equal(state.users["5"].firstName, "نیایش");
   assert.match(sent[0].text, /یاسین خیلی دوستت داره/);
 });
 

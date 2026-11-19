@@ -149,38 +149,48 @@ test("tips and reminders stay warm, varied, and free of a fixed period length", 
   assert.equal(moved.ownerChatId, undefined);
 });
 
-test("partner gets a user list by chat id and can switch journals", () => {
+test("partner sees names, selection sticks, and dates can be typed by hand", () => {
   let state = emptyState();
   let result = step(state, { chatId: 99, text: "من یاسینم" }, noon);
   state = result.state;
   assert.equal(state.partner.chatId, "99");
-  assert.match(result.replies[0].text, /آیدی تلگرام تو: 99/);
-  assert.match(result.replies[1].text, /هنوز کسی ثبت نکرده/);
-  result = step(state, { chatId: 8, username: "tester", text: "شروع ۱۴۰۵/۰۷/۰۱" }, noon);
+  assert.match(result.replies[0].text, /شناخته شدی/);
+  result = step(state, { chatId: 8, username: "tester", firstName: "سارا", text: "شروع ۱۴۰۵/۰۷/۰۱" }, noon);
   state = result.state;
   assert.equal(result.copies[0].chatId, "99");
-  assert.match(result.copies[0].text, /آیدی 8/);
-  assert.equal(result.copies[0].inline.inline_keyboard[0][0].callback_data, "p:status:8");
-  assert.equal(result.copies[0].inline.inline_keyboard[1][0].callback_data, "p:users");
-  result = step(state, { chatId: 7, text: "شروع ۱۴۰۵/۰۸/۰۱" }, noon);
+  assert.match(result.copies[0].text, /سارا \(@tester\)/);
+  assert.equal(state.users["8"].firstName, "سارا");
+  result = step(state, { chatId: 7, firstName: "نیایش", username: "NIH235", text: "شروع ۱۴۰۵/۰۸/۰۱" }, noon);
   state = result.state;
-  assert.match(result.copies[0].text, /آیدی 7/);
+  assert.match(result.copies[0].text, /نیایش/);
+  assert.equal(state.homeChatId, "8");
   result = step(state, { chatId: 99, text: "کاربران" }, noon);
   state = result.state;
-  assert.match(result.replies[0].text, /کاربران دفترچه/);
-  assert.match(result.replies[0].text, /\n7/);
-  assert.match(result.replies[0].text, /\n8/);
-  assert.equal(result.replies[0].inline.inline_keyboard[0][0].callback_data, "u:8");
+  assert.match(result.replies[0].text, /نیایش/);
+  assert.match(result.replies[0].text, /سارا/);
+  assert.doesNotMatch(result.replies[0].text, /^7 ·/m);
   result = step(state, { chatId: 99, data: "u:7" }, noon);
   state = result.state;
   assert.equal(state.homeChatId, "7");
-  result = step(state, { chatId: 99, data: "p:dates:7" }, noon);
-  assert.match(result.replies[0].text, /تاریخ‌های این دفترچه/);
-  result = step(state, { chatId: 99, text: "پایان ۱۴۰۵/۰۸/۰۵" }, noon);
+  assert.match(result.replies[0].text, /نیایش/);
+  assert.match(result.replies[0].text, /انتخاب شد/);
+  assert.match(result.replies[1].text, /آخرین شروع|هنوز تاریخی|فاصله/);
+  result = step(state, { chatId: 8, firstName: "سارا", text: "پایان ۱۴۰۵/۰۷/۰۵" }, noon);
+  state = result.state;
+  assert.equal(state.homeChatId, "7");
+  result = step(state, { chatId: 99, text: "وضعیت" }, noon);
+  assert.match(result.replies[0].text, /آبان|۲۸ روز|شروع/);
+  result = step(state, { chatId: 99, text: "ثبت پایان" }, noon);
+  state = result.state;
+  assert.equal(state.users["7"].pending.kind, "log-end");
+  result = step(state, { chatId: 99, text: "۱۴۰۵/۰۸/۰۵" }, noon);
   state = result.state;
   assert.equal(state.users["7"].cycles[0].end, toGregorian(1405, 8, 5));
-  result = step(state, { chatId: 99, text: "شروع ۱۴۰۵/۰۸/۲۰" }, noon);
+  result = step(state, { chatId: 99, text: "ثبت شروع" }, noon);
+  state = result.state;
+  result = step(state, { chatId: 99, text: "1405/08/20" }, noon);
   assert.equal(result.state.users["7"].cycles.length, 2);
+  assert.equal(result.state.users["7"].cycles[1].start, toGregorian(1405, 8, 20));
 });
 
 test("the journal seals and opens without leaking plaintext", () => {

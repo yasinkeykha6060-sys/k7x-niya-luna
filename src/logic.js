@@ -54,7 +54,36 @@ export function partnerPanel(journalId) {
 }
 
 function blankUser() {
-  return { nextId: 1, cycles: [], pending: null, sent: {}, tipCursor: 0, welcomed: false, rev: 0, gone: {}, username: "" };
+  return {
+    nextId: 1,
+    cycles: [],
+    pending: null,
+    sent: {},
+    tipCursor: 0,
+    welcomed: false,
+    rev: 0,
+    gone: {},
+    username: "",
+    firstName: "",
+    lastName: "",
+  };
+}
+
+export function displayName(user, chatId) {
+  const first = String(user?.firstName || "").trim();
+  const last = String(user?.lastName || "").trim();
+  const full = `${first} ${last}`.trim();
+  const handle = cleanUsername(user?.username);
+  if (full && handle) return `${full} (@${handle})`;
+  if (full) return full;
+  if (handle) return `@${handle}`;
+  return `کاربر ${chatId}`;
+}
+
+function touchProfile(user, event) {
+  if (cleanUsername(event.username)) user.username = cleanUsername(event.username);
+  if (event.firstName) user.firstName = String(event.firstName).trim().slice(0, 64);
+  if (event.lastName) user.lastName = String(event.lastName).trim().slice(0, 64);
 }
 
 function findByUsername(state, name) {
@@ -80,10 +109,8 @@ function pickJournal(state) {
   })[0];
 }
 
-function whoLabel(user, chatId, username) {
-  const name = cleanUsername(user?.username || username);
-  if (name) return `@${name} · آیدی ${chatId}`;
-  return `آیدی ${chatId}`;
+function whoLabel(user, chatId) {
+  return displayName(user, chatId);
 }
 
 export function migrate(raw) {
@@ -208,21 +235,24 @@ function isPartner(event, state = {}) {
 function usersList(state) {
   const ids = Object.keys(state.users || {})
     .filter((id) => id !== String(state.partner?.chatId || ""))
-    .sort((left, right) => Number(right) - Number(left));
+    .sort((left, right) => {
+      const a = displayName(state.users[left], left);
+      const b = displayName(state.users[right], right);
+      return a.localeCompare(b, "fa");
+    });
   if (!ids.length) {
-    return partnerReply("هنوز کسی ثبت نکرده. به محض ثبت، با آیدی اینجا می‌آید و در همین فهرست دیده می‌شود.");
+    return partnerReply("هنوز کسی ثبت نکرده. به محض ثبت، با اسم اینجا می‌آید و در همین فهرست دیده می‌شود.");
   }
   const lines = ids.map((id) => {
     const user = state.users[id];
     const marks = user.cycles?.length || 0;
     const open = openCycle(user.cycles || []) ? " · باز" : "";
     const focus = String(state.homeChatId) === String(id) ? " · انتخاب‌شده" : "";
-    return `${id}${user.username ? ` · @${user.username}` : ""} · ${marks} ثبت${open}${focus}`;
+    return `${displayName(user, id)} · ${marks} ثبت${open}${focus}`;
   });
   const inline = {
     inline_keyboard: ids.map((id) => {
-      const user = state.users[id];
-      const title = `${id}${user.username ? ` @${user.username}` : ""}`.slice(0, 60);
+      const title = displayName(state.users[id], id).slice(0, 60);
       return [{ text: title, callback_data: `u:${id}` }];
     }),
   };
@@ -292,8 +322,7 @@ export function step(raw, event, now = new Date()) {
     state.partner.chatId = String(chatId);
     if (String(state.homeChatId) === String(chatId)) state.homeChatId = null;
   } else {
-    const account = userOf(state, chatId);
-    if (cleanUsername(event.username)) account.username = cleanUsername(event.username);
+    touchProfile(userOf(state, chatId), event);
   }
 
   const panel = String(data || "").match(/^p:(status|cal|dates):(\d+)$/);
@@ -306,10 +335,11 @@ export function step(raw, event, now = new Date()) {
   if (data.startsWith("u:")) {
     if (!partner) return { state, replies: [{ text: "این دکمه مالِ یاسین است.", keyboard: undefined }], copies: [] };
     state.homeChatId = data.slice(2);
-    userOf(state, state.homeChatId);
+    const chosen = userOf(state, state.homeChatId);
     flushQueue(state, replies);
-    replies.push(partnerReply(`کاربر ${state.homeChatId} انتخاب شد.\nوضعیت، تقویم و تاریخ‌ها مالِ همین نفر است. تاریخ سفارشی: شروع ۱۴۰۵/۰۸/۲۷`));
-    replies.push(usersList(state));
+    const name = displayName(chosen, state.homeChatId);
+    replies.push(partnerReply(`${name} انتخاب شد.\nوضعیت، تقویم و تاریخ‌ها مالِ همین نفر است.\nتاریخ دستی: شروع ۱۴۰۵/۰۸/۲۷ یا پایان دیروز.`));
+    replies.push(partnerReply(statusText(forecast(chosen.cycles, today), today)));
     return { state, replies, copies: [] };
   }
 
@@ -317,7 +347,7 @@ export function step(raw, event, now = new Date()) {
     state.partner.chatId = String(chatId);
     if (String(state.homeChatId) === String(chatId)) state.homeChatId = null;
     flushQueue(state, replies);
-    replies.push(partnerReply(`شناخته شدی. آیدی تلگرام تو: ${chatId}\nاز این به بعد هر ثبتی با آیدی کاربر همین‌جا می‌آید.\nدکمه‌ی «کاربران» فهرست را نشان می‌دهد.`));
+    replies.push(partnerReply("شناخته شدی.\nاز این به بعد هر ثبتی با اسم کاربر همین‌جا می‌آید.\nدکمه‌ی «کاربران» فهرست اسم‌ها را نشان می‌دهد."));
     replies.push(usersList(state));
     return { state, replies, copies: [] };
   }
@@ -326,10 +356,9 @@ export function step(raw, event, now = new Date()) {
     flushQueue(state, replies);
     if (text === "/start" || text === "شروع دفتر") {
       replies.push(partnerReply([
-        `آیدی تلگرام تو: ${chatId}`,
-        "هر اکانتی که ثبت کند، خبرش با آیدی همین‌جا می‌آید.",
-        "دکمه‌ی «کاربران» فهرست را می‌آورد؛ یکی را بزن تا بینشان عوض شوی.",
-        "تاریخ سفارشی: شروع ۱۴۰۵/۰۸/۲۷ یا پایان دیروز.",
+        "هر اکانتی که ثبت کند، خبرش با اسم همین‌جا می‌آید.",
+        "دکمه‌ی «کاربران» فهرست اسم‌ها را می‌آورد؛ یکی را بزن تا بینشان عوض شوی.",
+        "تاریخ دستی: شروع ۱۴۰۵/۰۸/۲۷ · پایان دیروز · 27 آبان 1405",
       ].join("\n")));
     }
     replies.push(usersList(state));
@@ -339,11 +368,12 @@ export function step(raw, event, now = new Date()) {
   const journalId = partner ? pickJournal(state) : String(chatId);
   if (partner && !journalId) {
     flushQueue(state, replies);
-    replies.push(partnerReply("هنوز کسی در فهرست نیست. به محض ثبت، با آیدی اینجا می‌آید."));
+    replies.push(partnerReply("هنوز کسی در فهرست نیست. به محض ثبت، با اسم اینجا می‌آید."));
     replies.push(usersList(state));
     return { state, replies, copies: [] };
   }
-  if (partner) state.homeChatId = String(journalId);
+  if (partner && state.homeChatId) state.homeChatId = String(state.homeChatId);
+  else if (partner) state.homeChatId = String(journalId);
   const user = userOf(state, journalId);
   const beforeIds = new Set(user.cycles.map((cycle) => cycle.id));
   const beforeCycles = new Map(user.cycles.map((cycle) => [cycle.id, { ...cycle }]));
@@ -378,14 +408,14 @@ export function step(raw, event, now = new Date()) {
         if (body !== prevBody) cycle.rev = user.rev;
       }
     }
-    const label = whoLabel(user, journalId, event.username);
+    const label = whoLabel(user, journalId);
     const note = afterCore === beforeCore ? "" : changeNote(beforeCycles, user, partner, label);
     const copies = [];
     if (note && partner && journalId && String(journalId) !== String(state.partner.chatId)) {
       copies.push({ chatId: journalId, text: note });
     }
     if (note && !partner && String(chatId) !== String(state.partner.chatId)) {
-      state.homeChatId = String(chatId);
+      if (!state.homeChatId) state.homeChatId = String(chatId);
       const packet = {
         text: note,
         inline: {
@@ -480,7 +510,19 @@ export function step(raw, event, now = new Date()) {
     }
     const iso = parseDate(text, today);
     if (!iso) {
-      replies.push(reply("این تاریخ را نخواندم. یک بار دیگر، مثل ۱۴۰۵/۰۸/۲۷ یا ۲۷ آبان ۱۴۰۵."));
+      replies.push(reply("این تاریخ را نخواندم. مثال: امروز · دیروز · ۱۴۰۵/۰۸/۲۷ · 27 آبان 1405 · 2026-11-18"));
+      return done(replies);
+    }
+    if (user.pending.kind === "log-start") {
+      user.pending = null;
+      const result = addStart(user, iso);
+      replies.push(reply(result.error || savedStart(iso)));
+      return done(replies);
+    }
+    if (user.pending.kind === "log-end") {
+      user.pending = null;
+      const result = closeLatest(user, iso);
+      replies.push(reply(result.error || savedEnd(result.cycle)));
       return done(replies);
     }
     const cycle = findCycle(user, user.pending.id);
@@ -517,8 +559,8 @@ export function step(raw, event, now = new Date()) {
   if (text === "راهنما" || text === "/help") {
     user.welcomed = true;
     replies.push(reply([
-      "ثبت شروع و ثبت پایان، برای امروز. هر ماه می‌توانی یکی دیگر بنویسی.",
-      "اگر تاریخ دیگری است: شروع ۱۴۰۵/۰۸/۲۷ یا پایان دیروز.",
+      "ثبت شروع و ثبت پایان تاریخ می‌پرسند؛ می‌توانی امروز، دیروز، یا دستی بفرستی.",
+      "مثال: ۱۴۰۵/۰۸/۲۷ · 27 آبان 1405 · 2026-11-18 · شروع دیروز",
       "تاریخ‌ها را می‌شود ویرایش یا حذف کرد.",
       "تقویم شمسی است. روزهای ثبت‌شده تیک می‌خورند و کنارش میلادی را هم می‌نویسد.",
       "نکته هر بار یک حرف تازه می‌زند. جستجو از یادداشت‌های همین دفترچه جواب می‌دهد.",
@@ -582,7 +624,12 @@ export function step(raw, event, now = new Date()) {
 
   const startMatch = text.match(/^(?:ثبت شروع|شروع)(?:\s+(.+))?$/);
   if (startMatch) {
-    const iso = parseDate(startMatch[1] || "امروز", today);
+    if (!startMatch[1]) {
+      user.pending = { kind: "log-start" };
+      replies.push(reply("تاریخ شروع را بفرست.\nمثال: امروز · دیروز · ۱۴۰۵/۰۸/۲۷ · 27 آبان 1405 · 2026-11-18\nاگر منصرف شدی «بیخیال»."));
+      return done(replies);
+    }
+    const iso = parseDate(startMatch[1], today);
     if (!iso) replies.push(reply("تاریخ شروع را نخواندم. بنویس: شروع ۱۴۰۵/۰۸/۲۷"));
     else {
       const result = addStart(user, iso);
@@ -593,7 +640,12 @@ export function step(raw, event, now = new Date()) {
 
   const endMatch = text.match(/^(?:ثبت پایان|پایان)(?:\s+(.+))?$/);
   if (endMatch) {
-    const iso = parseDate(endMatch[1] || "امروز", today);
+    if (!endMatch[1]) {
+      user.pending = { kind: "log-end" };
+      replies.push(reply("تاریخ پایان را بفرست.\nمثال: امروز · دیروز · ۱۴۰۵/۰۸/۲۷ · 27 آبان 1405 · 2026-11-18\nاگر منصرف شدی «بیخیال»."));
+      return done(replies);
+    }
+    const iso = parseDate(endMatch[1], today);
     if (!iso) replies.push(reply("تاریخ پایان را نخواندم."));
     else {
       const result = closeLatest(user, iso);

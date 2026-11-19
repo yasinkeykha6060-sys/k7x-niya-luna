@@ -1,6 +1,6 @@
 import { dueReminders } from "./cycle.js";
 import { tehranHour, tehranToday } from "./dates.js";
-import { MAIN_KEYBOARD, migrate, step } from "./logic.js";
+import { MAIN_KEYBOARD, displayName, migrate, step } from "./logic.js";
 import { reminder } from "./phrases.js";
 
 const COMMANDS = [
@@ -51,6 +51,8 @@ async function handleUpdate(state, update, now, send, call, log = () => {}) {
       data: query.data,
       text: "",
       username: query.from?.username || "",
+      firstName: query.from?.first_name || "",
+      lastName: query.from?.last_name || "",
     }, now);
     await deliverResult(state, result, query.message.chat.id, send, log);
     return;
@@ -61,6 +63,8 @@ async function handleUpdate(state, update, now, send, call, log = () => {}) {
     chatId: message.chat.id,
     text: message.text || "",
     username: message.from?.username || "",
+    firstName: message.from?.first_name || "",
+    lastName: message.from?.last_name || "",
   }, now);
   await deliverResult(state, result, message.chat.id, send, log);
 }
@@ -76,7 +80,7 @@ async function remind(state, now, send, log) {
         await send(Number(chatId), { text: reminder(item), keyboard: MAIN_KEYBOARD });
         user.sent[item.key] = today;
         if (state.partner?.chatId && String(state.partner.chatId) !== String(chatId)) {
-          const who = user.username ? `@${user.username}` : `آیدی ${chatId}`;
+          const who = displayName(user, chatId);
           try {
             await send(Number(state.partner.chatId), {
               text: `یادآوری برای ${who}:\n${reminder(item)}`,
