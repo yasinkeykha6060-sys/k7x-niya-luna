@@ -36,6 +36,7 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           DATA_KEY: ${{ secrets.DATA_KEY }}
+          HOME_USERNAME: ${{ secrets.HOME_USERNAME }}
           WATCH_SECONDS: "16800"
           AUTO_PUSH: "1"
         run: |
