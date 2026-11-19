@@ -35,18 +35,48 @@ function ensureWatch(state) {
   return state;
 }
 
-export function partnerPanel() {
+export function partnerPanel(journalId) {
+  const id = String(journalId);
   return {
     inline_keyboard: [[
-      { text: "وضعیت", callback_data: "p:status" },
-      { text: "تقویم", callback_data: "p:cal" },
-      { text: "تاریخ‌ها", callback_data: "p:dates" },
+      { text: "وضعیت", callback_data: `p:status:${id}` },
+      { text: "تقویم", callback_data: `p:cal:${id}` },
+      { text: "تاریخ‌ها", callback_data: `p:dates:${id}` },
     ]],
   };
 }
 
 function blankUser() {
-  return { nextId: 1, cycles: [], pending: null, sent: {}, tipCursor: 0, welcomed: false, rev: 0, gone: {} };
+  return { nextId: 1, cycles: [], pending: null, sent: {}, tipCursor: 0, welcomed: false, rev: 0, gone: {}, username: "" };
+}
+
+function findByUsername(state, name) {
+  const want = cleanUsername(name);
+  if (!want) return null;
+  for (const [id, user] of Object.entries(state.users || {})) {
+    if (cleanUsername(user.username) === want) return id;
+  }
+  return null;
+}
+
+function pickJournal(state) {
+  if (state.homeChatId && state.users[state.homeChatId]) return String(state.homeChatId);
+  const byName = findByUsername(state, state.homeUsername);
+  if (byName) return byName;
+  const ids = Object.keys(state.users || {})
+    .filter((id) => id !== state.partner?.chatId && state.users[id]?.cycles?.length);
+  if (!ids.length) return null;
+  return ids.sort((left, right) => {
+    const a = state.users[left].cycles[state.users[left].cycles.length - 1]?.start || "";
+    const b = state.users[right].cycles[state.users[right].cycles.length - 1]?.start || "";
+    return b.localeCompare(a);
+  })[0];
+}
+
+function whoLabel(user, chatId, username) {
+  const name = cleanUsername(user?.username || username);
+  if (name) return `@${name} · آیدی ${chatId}`;
+  return `آیدی ${chatId}`;
 }
 
 export function migrate(raw) {
@@ -75,6 +105,7 @@ export function migrate(raw) {
       welcomed: true,
       rev: 1,
       gone: {},
+      username: "",
     };
   }
   const offset = Number(raw.offset) || 0;
@@ -146,13 +177,6 @@ function isPartner(event) {
   return cleanUsername(event.username) === PARTNER_USERNAME;
 }
 
-function isHome(event, state) {
-  const name = cleanUsername(event.username);
-  if (state.homeUsername && name && name === state.homeUsername) return true;
-  if (state.homeChatId && String(event.chatId) === String(state.homeChatId) && state.homeUsername) return true;
-  return false;
-}
-
 function changeNote(beforeMap, user, byPartner, who) {
   const after = new Map(user.cycles.map((cycle) => [cycle.id, cycle]));
   const lines = [];
@@ -170,9 +194,10 @@ function changeNote(beforeMap, user, byPartner, who) {
     lines.push(`ثبت شد: شروع ${formatDual(cycle.start)}${end}`);
   }
   if (!lines.length) return "";
-  const tag = who ? ` (@${who})` : "";
-  const head = byPartner ? "یاسین در دفترچه‌ی نیایش نوشت." : `نیایش${tag} در دفترچه ثبت کرد.`;
-  return `${head}\n${lines.join("\n")}\nبرای دیدن و عوض کردن، دکمه‌های زیر را بزن.`;
+  const head = byPartner
+    ? `یاسین دفترچه‌ی ${who} را عوض کرد.`
+    : `ثبت تازه از ${who}.`;
+  return `${head}\n${lines.join("\n")}\nدکمه‌ها: وضعیت، تقویم، تاریخ‌ها. تاریخ سفارشی: شروع ۱۴۰۵/۰۸/۲۷`;
 }
 
 function listText(user, partnerView) {
@@ -190,8 +215,8 @@ function listText(user, partnerView) {
       { text: `حذف ${cycle.id}`, callback_data: `del:${cycle.id}` },
     ]),
   };
-  const title = partnerView ? "تاریخ‌های نیایش، جدیدترها بالا:" : "تاریخ‌های تو، جدیدترها بالا:";
-  return { text: `${title}\n${lines.join("\n")}\nبرای اصلاح، دکمه‌ی همان شماره را بزن. هر ماه می‌توانی یکی دیگر اضافه کنی.`, inline };
+  const title = partnerView ? "تاریخ‌های این دفترچه، جدیدترها بالا:" : "تاریخ‌های تو، جدیدترها بالا:";
+  return { text: `${title}\n${lines.join("\n")}\nبرای اصلاح، دکمه‌ی همان شماره را بزن. تاریخ سفارشی هم می‌توانی بفرستی: شروع ۱۴۰۵/۰۸/۲۷`, inline };
 }
 
 function menuButton(text) {
@@ -206,46 +231,61 @@ export function step(raw, event, now = new Date()) {
   const data = event.data || "";
   const replies = [];
   const partner = isPartner(event);
-  const home = isHome(event, state);
   if (partner) {
     state.partner.chatId = String(chatId);
     if (String(state.homeChatId) === String(chatId)) state.homeChatId = null;
-  } else if (home) {
-    state.homeChatId = String(chatId);
-    if (cleanUsername(event.username)) state.homeUsername = cleanUsername(event.username);
+  } else {
+    const account = userOf(state, chatId);
+    if (cleanUsername(event.username)) account.username = cleanUsername(event.username);
   }
 
-  if (partner) {
-    const bindName = text.match(/^نیایش\s+@?([A-Za-z0-9_]{5,})$/i);
-    if (bindName) {
-      state.homeUsername = cleanUsername(bindName[1]);
-      state.homeChatId = null;
-      replies.push(reply(`فقط @${state.homeUsername} برای تو می‌آید.\nاولین باری که از همان حساب چیزی ثبت کند، دفترچه‌اش قفل می‌شود و بعد از آن وضعیت، تقویم و تاریخ‌ها مالِ اوست.`));
-      return { state, replies, copies: [] };
-    }
-    const bindId = text.match(/^نیایش\s+(?:آیدی|id|chat)?\s*(\d{5,})$/i);
-    if (bindId) {
+  const panel = String(data || "").match(/^p:(status|cal|dates):(\d+)$/);
+  if (panel) {
+    state.homeChatId = panel[2];
+    const map = { status: "وضعیت", cal: "تقویم", dates: "تاریخ‌ها" };
+    return step(state, { ...event, data: "", text: map[panel[1]] }, now);
+  }
+
+  if (partner && !menuButton(text) && !text.startsWith("/")) {
+    const bindId = text.match(/^(?:نیایش\s+)?(?:آیدی|id|chat)?\s*(\d{5,})$/i);
+    const bindName = text.match(/^(?:نیایش\s+)?@?([A-Za-z][A-Za-z0-9_]{3,})$/i);
+    if (bindId && !parseDate(text, today)) {
       state.homeChatId = bindId[1];
-      if (!state.homeUsername) state.homeUsername = "niyayesh";
-      replies.push(reply(`دفترچه‌ی آیدی ${state.homeChatId} مالِ نیایش شد.\nاز همین دکمه‌ها وضعیت، تقویم و تاریخ‌ها را می‌بینی و عوض می‌کنی.`));
+      userOf(state, state.homeChatId);
+      replies.push(reply(`دفترچه‌ی آیدی ${state.homeChatId} باز است.\nوضعیت، تقویم و تاریخ‌ها مالِ همین نفر است. تاریخ سفارشی: شروع ۱۴۰۵/۰۸/۲۷`));
+      return { state, replies, copies: [] };
+    }
+    if (bindName && !parseDate(text, today)) {
+      state.homeUsername = cleanUsername(bindName[1]);
+      const found = findByUsername(state, state.homeUsername);
+      state.homeChatId = found;
+      replies.push(reply(found
+        ? `دفترچه‌ی @${state.homeUsername} باز است.\nاز دکمه‌ها ببین و عوض کن. تاریخ سفارشی: شروع ۱۴۰۵/۰۸/۲۷`
+        : `@${state.homeUsername} را گذاشتم. به محض اولین ثبت از همان حساب، خبرش با آیدی می‌آید و می‌توانی ادیت کنی.`));
       return { state, replies, copies: [] };
     }
   }
 
-  if (partner && !state.homeChatId) {
+  if (partner && (text === "/start" || text === "شروع دفتر")) {
     const waiting = state.partnerQueue.splice(0);
-    const need = state.homeUsername
-      ? `منتظر @${state.homeUsername} هستم تا یک بار از گوشی خودش ثبت کند.`
-      : "اول یوزرنیم تلگرام نیایش را بفرست، دقیقاً همین‌طور:\nنیایش @username";
-    replies.push(reply(["دفترچه‌ی نیایش اینجاست.", "فقط ثبت‌های خودِ او برای تو می‌آید، نه اکانت تست.", need, ...waiting].filter(Boolean).join("\n")));
+    const focus = pickJournal(state);
+    if (focus) state.homeChatId = focus;
+    replies.push(reply([
+      "هر اکانتی که ثبت کند، با یوزرنیم و آیدی‌اش همین‌جا می‌آید.",
+      "روی دکمه‌های هر خبر می‌توانی وضعیت، تقویم و تاریخ‌ها را ببینی و عوض کنی.",
+      "برای باز کردن یک نفر بفرست: @NIH235 یا آیدی عددی.",
+      "تاریخ سفارشی: شروع ۱۴۰۵/۰۸/۲۷ یا پایان دیروز.",
+      ...waiting,
+    ].join("\n")));
     return { state, replies, copies: [] };
   }
 
-  if (data === "p:status") return step(state, { ...event, data: "", text: "وضعیت" }, now);
-  if (data === "p:cal") return step(state, { ...event, data: "", text: "تقویم" }, now);
-  if (data === "p:dates") return step(state, { ...event, data: "", text: "تاریخ‌ها" }, now);
-
-  const journalId = partner ? String(state.homeChatId) : String(chatId);
+  const journalId = partner ? pickJournal(state) : String(chatId);
+  if (partner && !journalId) {
+    replies.push(reply("هنوز ثبتی نرسیده. هر اکانتی که ثبت کند همین‌جا می‌آید. اگر یوزرنیمش را داری بفرست: @username"));
+    return { state, replies, copies: [] };
+  }
+  if (partner) state.homeChatId = String(journalId);
   const user = userOf(state, journalId);
   const beforeIds = new Set(user.cycles.map((cycle) => cycle.id));
   const beforeCycles = new Map(user.cycles.map((cycle) => [cycle.id, { ...cycle }]));
@@ -280,31 +320,19 @@ export function step(raw, event, now = new Date()) {
         if (body !== prevBody) cycle.rev = user.rev;
       }
     }
-    const who = state.homeUsername || cleanUsername(event.username);
-    const note = afterCore === beforeCore ? "" : changeNote(beforeCycles, user, partner, who);
+    const label = whoLabel(user, journalId, event.username);
+    const note = afterCore === beforeCore ? "" : changeNote(beforeCycles, user, partner, label);
     const copies = [];
-    if (note && partner && state.homeChatId) {
-      copies.push({ chatId: state.homeChatId, text: note });
+    if (note && partner && journalId && String(journalId) !== String(state.partner.chatId)) {
+      copies.push({ chatId: journalId, text: note });
     }
-    if (note && home && String(chatId) === String(state.homeChatId)) {
-      const packet = { chatId: state.partner.chatId, text: note, inline: partnerPanel() };
-      if (state.partner.chatId) copies.push(packet);
+    if (note && !partner && String(chatId) !== String(state.partner.chatId)) {
+      state.homeChatId = String(chatId);
+      const packet = { text: note, inline: partnerPanel(chatId) };
+      if (state.partner.chatId) copies.push({ chatId: state.partner.chatId, ...packet });
       else if (state.partnerQueue.length < 30) state.partnerQueue.push(note);
     }
     return { state, replies: items, copies };
-  }
-
-  if (partner && (text === "/start" || text === "شروع دفتر")) {
-    const waiting = state.partnerQueue.splice(0);
-    const lines = [
-      "دفترچه‌ی نیایش اینجاست.",
-      "فقط ثبت‌های خودِ او برای تو می‌آید.",
-      state.homeUsername ? `قفل روی @${state.homeUsername}.` : "یوزرنیم او را بفرست: نیایش @username",
-      "وضعیت، تقویم و تاریخ‌ها مالِ اوست و می‌توانی عوضشان کنی.",
-      ...waiting,
-    ];
-    replies.push(reply(lines.filter(Boolean).join("\n")));
-    return done(replies);
   }
 
   if (data.startsWith("cal:")) {

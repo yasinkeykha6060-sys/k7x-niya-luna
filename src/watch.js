@@ -74,9 +74,19 @@ async function remind(state, now, send, log) {
       try {
         await send(Number(chatId), { text: reminder(item), keyboard: MAIN_KEYBOARD });
         user.sent[item.key] = today;
-        if (String(chatId) === String(state.homeChatId) && state.partner?.chatId && String(state.partner.chatId) !== String(chatId)) {
+        if (state.partner?.chatId && String(state.partner.chatId) !== String(chatId)) {
+          const who = user.username ? `@${user.username}` : `آیدی ${chatId}`;
           try {
-            await send(Number(state.partner.chatId), { text: `یادآوری نیایش:\n${reminder(item)}`, keyboard: MAIN_KEYBOARD });
+            await send(Number(state.partner.chatId), {
+              text: `یادآوری برای ${who}:\n${reminder(item)}`,
+              inline: {
+                inline_keyboard: [[
+                  { text: "وضعیت", callback_data: `p:status:${chatId}` },
+                  { text: "تقویم", callback_data: `p:cal:${chatId}` },
+                  { text: "تاریخ‌ها", callback_data: `p:dates:${chatId}` },
+                ]],
+              },
+            });
           } catch { /* her reminder already stands */ }
         }
       } catch (error) {
