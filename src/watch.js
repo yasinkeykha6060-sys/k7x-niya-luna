@@ -28,7 +28,11 @@ async function deliverResult(state, result, replyChatId, send) {
   for (const copy of result.copies || []) {
     if (!copy?.chatId || !copy.text) continue;
     try {
-      await send(copy.chatId, { text: copy.text, keyboard: MAIN_KEYBOARD });
+      await send(copy.chatId, {
+        text: copy.text,
+        keyboard: copy.inline ? undefined : MAIN_KEYBOARD,
+        inline: copy.inline,
+      });
     } catch {
       state.partnerQueue = state.partnerQueue || [];
       if (state.partnerQueue.length < 30) state.partnerQueue.push(copy.text);

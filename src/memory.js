@@ -1,4 +1,4 @@
-import { PARTNER_USERNAME, migrate } from "./logic.js";
+import { PARTNER_USERNAME, cleanUsername, migrate } from "./logic.js";
 
 function fingerprint(state) {
   const copy = structuredClone(state);
@@ -59,6 +59,7 @@ export function mergeJournals(local, remote) {
   for (const id of new Set([...Object.keys(left.users || {}), ...Object.keys(right.users || {})])) {
     users[id] = mergeUser(left.users[id], right.users[id]);
   }
+  const homeName = cleanUsername(left.homeUsername || right.homeUsername || process.env.HOME_USERNAME || "");
   const home = [left, right].find((side) => side.homeChatId && side.users?.[side.homeChatId]?.cycles?.length)?.homeChatId
     || left.homeChatId
     || right.homeChatId
@@ -69,6 +70,7 @@ export function mergeJournals(local, remote) {
     revision: Math.max(Number(left.revision) || 0, Number(right.revision) || 0),
     users,
     homeChatId: home ? String(home) : null,
+    homeUsername: homeName,
     partner: { username: PARTNER_USERNAME, chatId: left.partner?.chatId || right.partner?.chatId || null },
     partnerQueue: [...(right.partnerQueue || []), ...(left.partnerQueue || [])].slice(-30),
   };
