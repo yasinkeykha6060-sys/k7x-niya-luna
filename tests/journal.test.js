@@ -182,12 +182,14 @@ test("partner sees names, selection sticks, and dates can be typed by hand", () 
   assert.match(result.replies[0].text, /آبان|۲۸ روز|شروع/);
   result = step(state, { chatId: 99, text: "ثبت پایان" }, noon);
   state = result.state;
-  assert.equal(state.users["7"].pending.kind, "log-end");
-  result = step(state, { chatId: 99, text: "۱۴۰۵/۰۸/۰۵" }, noon);
+  assert.equal(state.users["7"].cycles[0].end, "2026-11-18");
+  assert.equal(state.users["7"].pending, null);
+  result = step(state, { chatId: 99, text: "تاریخ دستی" }, noon);
   state = result.state;
-  assert.equal(state.users["7"].cycles[0].end, toGregorian(1405, 8, 5));
-  result = step(state, { chatId: 99, text: "ثبت شروع" }, noon);
+  assert.equal(result.replies[0].inline.inline_keyboard[0][0].callback_data, "m:start");
+  result = step(state, { chatId: 99, data: "m:start" }, noon);
   state = result.state;
+  assert.equal(state.users["7"].pending.kind, "log-start");
   result = step(state, { chatId: 99, text: "1405/08/20" }, noon);
   assert.equal(result.state.users["7"].cycles.length, 2);
   assert.equal(result.state.users["7"].cycles[1].start, toGregorian(1405, 8, 20));

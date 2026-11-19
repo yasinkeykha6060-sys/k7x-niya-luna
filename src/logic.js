@@ -159,9 +159,10 @@ function userOf(state, chatId) {
 export const MAIN_KEYBOARD = {
   keyboard: [
     [{ text: "ثبت شروع" }, { text: "ثبت پایان" }],
+    [{ text: "تاریخ دستی" }, { text: "تاریخ‌ها" }],
     [{ text: "وضعیت" }, { text: "تقویم" }],
     [{ text: "نکته" }, { text: "جستجو" }],
-    [{ text: "تاریخ‌ها" }, { text: "داروها" }],
+    [{ text: "داروها" }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -172,10 +173,20 @@ export const PARTNER_KEYBOARD = {
     [{ text: "کاربران" }, { text: "وضعیت" }],
     [{ text: "تقویم" }, { text: "تاریخ‌ها" }],
     [{ text: "ثبت شروع" }, { text: "ثبت پایان" }],
+    [{ text: "تاریخ دستی" }],
   ],
   resize_keyboard: true,
   is_persistent: true,
 };
+
+function manualDateMenu() {
+  return {
+    inline_keyboard: [[
+      { text: "شروع با تاریخ دیگر", callback_data: "m:start" },
+      { text: "پایان با تاریخ دیگر", callback_data: "m:end" },
+    ]],
+  };
+}
 
 function reply(text, extra = {}) {
   return {
@@ -307,7 +318,7 @@ function listText(user, partnerView) {
 }
 
 function menuButton(text) {
-  return ["ثبت شروع", "ثبت پایان", "وضعیت", "تقویم", "نکته", "جستجو", "تاریخ‌ها", "تاریخها", "داروها", "دارو", "راهنما", "کاربران"].includes(text);
+  return ["ثبت شروع", "ثبت پایان", "تاریخ دستی", "وضعیت", "تقویم", "نکته", "جستجو", "تاریخ‌ها", "تاریخها", "داروها", "دارو", "راهنما", "کاربران"].includes(text);
 }
 
 export function step(raw, event, now = new Date()) {
@@ -338,7 +349,7 @@ export function step(raw, event, now = new Date()) {
     const chosen = userOf(state, state.homeChatId);
     flushQueue(state, replies);
     const name = displayName(chosen, state.homeChatId);
-    replies.push(partnerReply(`${name} انتخاب شد.\nوضعیت، تقویم و تاریخ‌ها مالِ همین نفر است.\nتاریخ دستی: شروع ۱۴۰۵/۰۸/۲۷ یا پایان دیروز.`));
+    replies.push(partnerReply(`${name} انتخاب شد.\nوضعیت، تقویم و تاریخ‌ها مالِ همین نفر است.\nبرای تاریخ دیگر «تاریخ دستی» را بزن؛ برای عوض کردن «تاریخ‌ها».`));
     replies.push(partnerReply(statusText(forecast(chosen.cycles, today), today)));
     return { state, replies, copies: [] };
   }
@@ -358,7 +369,7 @@ export function step(raw, event, now = new Date()) {
       replies.push(partnerReply([
         "هر اکانتی که ثبت کند، خبرش با اسم همین‌جا می‌آید.",
         "دکمه‌ی «کاربران» فهرست اسم‌ها را می‌آورد؛ یکی را بزن تا بینشان عوض شوی.",
-        "تاریخ دستی: شروع ۱۴۰۵/۰۸/۲۷ · پایان دیروز · 27 آبان 1405",
+        "ثبت شروع و ثبت پایان برای امروز است. تاریخ دیگر را از «تاریخ دستی» یا «تاریخ‌ها» بزن.",
       ].join("\n")));
     }
     replies.push(usersList(state));
@@ -440,6 +451,13 @@ export function step(raw, event, now = new Date()) {
     flushQueue(state, replies);
     replies.push(usersList(state));
     return { state, replies, copies: [] };
+  }
+
+  if (data === "m:start" || data === "m:end") {
+    user.pending = { kind: data === "m:start" ? "log-start" : "log-end" };
+    const kind = data === "m:start" ? "شروع" : "پایان";
+    replies.push(reply(`تاریخ ${kind} را بفرست.\nمثال: دیروز · ۱۴۰۵/۰۸/۲۷ · 27 آبان 1405 · 2026-11-18\nاگر منصرف شدی «بیخیال».`));
+    return done(replies);
   }
 
   if (data.startsWith("cal:")) {
@@ -559,9 +577,9 @@ export function step(raw, event, now = new Date()) {
   if (text === "راهنما" || text === "/help") {
     user.welcomed = true;
     replies.push(reply([
-      "ثبت شروع و ثبت پایان تاریخ می‌پرسند؛ می‌توانی امروز، دیروز، یا دستی بفرستی.",
-      "مثال: ۱۴۰۵/۰۸/۲۷ · 27 آبان 1405 · 2026-11-18 · شروع دیروز",
-      "تاریخ‌ها را می‌شود ویرایش یا حذف کرد.",
+      "ثبت شروع و ثبت پایان همان روز را می‌نویسند.",
+      "تاریخ دیگر: دکمه‌ی «تاریخ دستی». ویرایش و حذف: «تاریخ‌ها».",
+      "مثال دستی: دیروز · ۱۴۰۵/۰۸/۲۷ · 27 آبان 1405 · 2026-11-18",
       "تقویم شمسی است. روزهای ثبت‌شده تیک می‌خورند و کنارش میلادی را هم می‌نویسد.",
       "نکته هر بار یک حرف تازه می‌زند. جستجو از یادداشت‌های همین دفترچه جواب می‌دهد.",
       "دفترچه‌ی هر کس جداست. داروها در ربات جدا یادآوری می‌شوند.",
@@ -594,9 +612,22 @@ export function step(raw, event, now = new Date()) {
     return done(replies);
   }
 
+  if (text === "تاریخ دستی" || text === "/manual") {
+    replies.push({
+      text: "تاریخ را دستی ثبت کن.\nثبت شروع و ثبت پایان مالِ امروز است؛ اینجا روز دیگر را می‌نویسی.",
+      inline: manualDateMenu(),
+      keyboard: partner ? PARTNER_KEYBOARD : MAIN_KEYBOARD,
+    });
+    return done(replies);
+  }
+
   if (text === "تاریخ‌ها" || text === "تاریخها" || text === "/dates") {
     const view = listText(user, partner);
-    replies.push({ text: view.text, inline: view.inline, keyboard: MAIN_KEYBOARD });
+    replies.push({
+      text: `${view.text}\nبرای تاریخ تازه با روز دیگر، «تاریخ دستی» را بزن.`,
+      inline: view.inline,
+      keyboard: partner ? PARTNER_KEYBOARD : MAIN_KEYBOARD,
+    });
     return done(replies);
   }
 
@@ -624,13 +655,8 @@ export function step(raw, event, now = new Date()) {
 
   const startMatch = text.match(/^(?:ثبت شروع|شروع)(?:\s+(.+))?$/);
   if (startMatch) {
-    if (!startMatch[1]) {
-      user.pending = { kind: "log-start" };
-      replies.push(reply("تاریخ شروع را بفرست.\nمثال: امروز · دیروز · ۱۴۰۵/۰۸/۲۷ · 27 آبان 1405 · 2026-11-18\nاگر منصرف شدی «بیخیال»."));
-      return done(replies);
-    }
-    const iso = parseDate(startMatch[1], today);
-    if (!iso) replies.push(reply("تاریخ شروع را نخواندم. بنویس: شروع ۱۴۰۵/۰۸/۲۷"));
+    const iso = parseDate(startMatch[1] || "امروز", today);
+    if (!iso) replies.push(reply("تاریخ شروع را نخواندم. از «تاریخ دستی» بزن یا بنویس: شروع ۱۴۰۵/۰۸/۲۷"));
     else {
       const result = addStart(user, iso);
       replies.push(reply(result.error || savedStart(iso)));
@@ -640,13 +666,8 @@ export function step(raw, event, now = new Date()) {
 
   const endMatch = text.match(/^(?:ثبت پایان|پایان)(?:\s+(.+))?$/);
   if (endMatch) {
-    if (!endMatch[1]) {
-      user.pending = { kind: "log-end" };
-      replies.push(reply("تاریخ پایان را بفرست.\nمثال: امروز · دیروز · ۱۴۰۵/۰۸/۲۷ · 27 آبان 1405 · 2026-11-18\nاگر منصرف شدی «بیخیال»."));
-      return done(replies);
-    }
-    const iso = parseDate(endMatch[1], today);
-    if (!iso) replies.push(reply("تاریخ پایان را نخواندم."));
+    const iso = parseDate(endMatch[1] || "امروز", today);
+    if (!iso) replies.push(reply("تاریخ پایان را نخواندم. از «تاریخ دستی» بزن یا بنویس: پایان دیروز"));
     else {
       const result = closeLatest(user, iso);
       replies.push(reply(result.error || savedEnd(result.cycle)));
