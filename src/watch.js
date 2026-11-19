@@ -22,25 +22,26 @@ function defaultSend(call, chatId, message) {
   return call("sendMessage", body);
 }
 
-async function deliverResult(state, result, replyChatId, send) {
+async function deliverResult(state, result, replyChatId, send, log = () => {}) {
   Object.assign(state, result.state);
   for (const message of result.replies) await send(replyChatId, message);
   for (const copy of result.copies || []) {
     if (!copy?.chatId || !copy.text) continue;
     try {
-      await send(copy.chatId, {
+      await send(Number(copy.chatId) || copy.chatId, {
         text: copy.text,
         keyboard: copy.inline ? undefined : MAIN_KEYBOARD,
         inline: copy.inline,
       });
-    } catch {
+    } catch (error) {
+      log(error.message || `خبر برای ${copy.chatId} نرفت`);
       state.partnerQueue = state.partnerQueue || [];
       if (state.partnerQueue.length < 30) state.partnerQueue.push(copy.text);
     }
   }
 }
 
-async function handleUpdate(state, update, now, send, call) {
+async function handleUpdate(state, update, now, send, call, log = () => {}) {
   if (update.callback_query) {
     const query = update.callback_query;
     if (query.message?.chat?.type && query.message.chat.type !== "private") return;
@@ -51,7 +52,7 @@ async function handleUpdate(state, update, now, send, call) {
       text: "",
       username: query.from?.username || "",
     }, now);
-    await deliverResult(state, result, query.message.chat.id, send);
+    await deliverResult(state, result, query.message.chat.id, send, log);
     return;
   }
   const message = update.message;
@@ -61,7 +62,7 @@ async function handleUpdate(state, update, now, send, call) {
     text: message.text || "",
     username: message.from?.username || "",
   }, now);
-  await deliverResult(state, result, message.chat.id, send);
+  await deliverResult(state, result, message.chat.id, send, log);
 }
 
 async function remind(state, now, send, log) {
@@ -135,7 +136,7 @@ export async function runWatch({
       for (const update of updates || []) {
         state.offset = update.update_id + 1;
         try {
-          await handleUpdate(state, update, now(), deliver, call);
+          await handleUpdate(state, update, now(), deliver, call, log);
         } catch (error) {
           log(error.message || "این پیام نماند");
         }

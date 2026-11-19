@@ -37,6 +37,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           DATA_KEY: ${{ secrets.DATA_KEY }}
           HOME_USERNAME: ${{ secrets.HOME_USERNAME }}
+          PARTNER_CHAT_ID: ${{ secrets.PARTNER_CHAT_ID }}
           WATCH_SECONDS: "16800"
           AUTO_PUSH: "1"
         run: |
